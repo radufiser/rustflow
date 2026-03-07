@@ -1,8 +1,8 @@
-use rustflow_common::{APP_NAME, APP_VERSION, HealthStatus};
+use rustflow_common::{APP_NAME, APP_VERSION, DEFAULT_PORT, HealthStatus};
 
 #[tokio::main]
 async fn main() {
-    println!("Starting {} v{}", APP_NAME, APP_VERSION);
+    println!("Starting {} port {} v{}", APP_NAME, DEFAULT_PORT, APP_VERSION);
 
     // Verify that shared types from rustflow_common are working
     let health = HealthStatus::default();
