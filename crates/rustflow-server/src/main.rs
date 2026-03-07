@@ -1,7 +1,11 @@
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Json, Router, routing::get};
-use rustflow_common::{APP_NAME, APP_VERSION, HealthStatus, Priority, Task, TaskFilter, TaskStatus, CreateTask};
+use axum::routing::patch;
+use rustflow_common::{
+    APP_NAME, APP_VERSION, CreateTask, HealthStatus, Priority, Task, TaskFilter, TaskStatus,
+    UpdateTask,
+};
 use tokio::net::TcpListener;
 
 /// Root endpoint - a simple liveness message
@@ -55,6 +59,34 @@ async fn create_task(Json(payload): Json<CreateTask>) -> (StatusCode, Json<Task>
     (StatusCode::CREATED, Json(task))
 }
 
+async fn update_task(
+    Path(id): Path<u64>,
+    Json(payload): Json<UpdateTask>,
+) -> Result<Json<Task>, StatusCode> {
+    let mut tasks = sample_tasks();
+    if let Some(task) = tasks.iter_mut().find(|task| task.id == id) {
+        task.title = payload.title;
+        task.description = payload.description;
+        task.priority = payload.priority;
+        Ok(Json(task.clone()))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+async fn change_task_status(
+    Path(id): Path<u64>,
+    Json(payload): Json<TaskStatus>,
+) -> Result<Json<Task>, StatusCode> {
+    let mut tasks = sample_tasks();
+    if let Some(task) = tasks.iter_mut().find(|task| task.id == id) {
+        task.status = payload;
+        Ok(Json(task.clone()))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -91,7 +123,8 @@ async fn main() {
         .route("/", get(root))
         .route("/health", get(health))
         .route("/tasks", get(list_tasks).post(create_task))
-        .route("/tasks/{id}", get(get_task));
+        .route("/tasks/{id}", get(get_task).put(update_task))
+        .route("/tasks/{id}/status", patch(change_task_status));
 
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)
