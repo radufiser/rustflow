@@ -1,17 +1,29 @@
-use rustflow_common::{APP_NAME, APP_VERSION, DEFAULT_PORT, HealthStatus};
+use axum::{Router, routing::get};
+use rustflow_common::{APP_NAME, APP_VERSION, HealthStatus};
+use tokio::net::TcpListener;
+
+/// Root endpoint - a simple liveness message
+async fn root() -> &'static str {
+    "RustFlow is running!"
+}
+
+/// Health check endpoint - returns structured JSON about the service
+async fn health() -> axum::Json<HealthStatus> {
+    axum::Json(HealthStatus::default())
+}
 
 #[tokio::main]
 async fn main() {
-    println!("Starting {} port {} v{}", APP_NAME, DEFAULT_PORT, APP_VERSION);
+    // Build the application router
+    let app = Router::new()
+        .route("/", get(root))
+        .route("/health", get(health));
+    let addr = "0.0.0.0:3000";
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind to address");
 
-    // Verify that shared types from rustflow_common are working
-    let health = HealthStatus::default();
-    println!(
-        "Health Check: {}",
-        serde_json::to_string_pretty(&health).unwrap()
-    );
+    println!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
 
-    println!("Workspace configured correctly!");
-    println!();
-    println!("Next up: Section 2.1 — we'll turn this into a real HTTP server with Axum.");
+    axum::serve(listener, app).await.expect("Server error");
 }
