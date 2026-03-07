@@ -1,0 +1,10 @@
+[package]
+name = "rustflow-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustflow-common = { path = "../rustflow-common" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
