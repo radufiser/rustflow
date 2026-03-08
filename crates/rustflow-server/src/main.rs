@@ -4,7 +4,6 @@ use axum::{Json, Router, routing::get};
 use axum::routing::patch;
 use rustflow_common::{
     APP_NAME, APP_VERSION, CreateTask, HealthStatus, Priority, Task, TaskFilter, TaskStatus,
-    UpdateTask,
 };
 use tokio::net::TcpListener;
 
@@ -28,6 +27,7 @@ async fn list_tasks(Query(filter): Query<TaskFilter>) -> Json<Vec<Task>> {
         .into_iter()
         .filter(|task| filter.status.as_ref().map_or(true, |s| &task.status == s))
         .filter(|task| filter.status.as_ref().map_or(true, |s| &task.status == s))
+        .filter(|task| filter.search.as_ref().map_or(true, |s| task.title.contains(s) || task.description.as_ref().map_or(false, |d| d.contains(s))))
         .collect();
 
     Json(filtered)
@@ -61,7 +61,7 @@ async fn create_task(Json(payload): Json<CreateTask>) -> (StatusCode, Json<Task>
 
 async fn update_task(
     Path(id): Path<u64>,
-    Json(payload): Json<UpdateTask>,
+    Json(payload): Json<CreateTask>,
 ) -> Result<Json<Task>, StatusCode> {
     let mut tasks = sample_tasks();
     if let Some(task) = tasks.iter_mut().find(|task| task.id == id) {
