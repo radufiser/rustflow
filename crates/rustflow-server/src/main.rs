@@ -1,6 +1,6 @@
 mod extractors;
 
-use axum::extract::{Path, Query};
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{Json, Router, routing::get};
 use axum::routing::patch;
@@ -8,7 +8,7 @@ use rustflow_common::{
     APP_NAME, APP_VERSION, CreateTask, HealthStatus, Priority, Task, TaskFilter, TaskStatus,
 };
 use tokio::net::TcpListener;
-use crate::extractors::ValidatedJson;
+use crate::extractors::{ValidatedJson, ValidatedQuery};
 
 /// Root endpoint - a simple liveness message
 async fn root() -> &'static str {
@@ -22,8 +22,8 @@ async fn health() -> axum::Json<HealthStatus> {
 
 /// GET /tasks?status=pending&priority=high
 ///
-/// The Query extractor deserializes query parameters into a TaskFilter struct.
-async fn list_tasks(Query(filter): Query<TaskFilter>) -> Json<Vec<Task>> {
+/// The ValidatedQuery extractor deserializes and validates query parameters into a TaskFilter struct.
+async fn list_tasks(ValidatedQuery(filter): ValidatedQuery<TaskFilter>) -> Json<Vec<Task>> {
     let tasks = sample_tasks();
 
     let filtered: Vec<Task> = tasks
