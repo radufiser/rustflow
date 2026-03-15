@@ -1,6 +1,6 @@
+use rustflow_common::{AppConfig, Priority, Project, Task, TaskStatus, User};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use rustflow_common::{AppConfig, Priority, Project, Task, TaskStatus};
 
 // ── Task State ──────────────────────────────────────────────
 
@@ -20,41 +20,36 @@ pub struct TaskStore {
 
 impl TaskStore {
     pub fn new() -> Self {
-
-           let  tasks =  vec![
-                Task {
-                    id: 1,
-                    title: "Set up workspace".into(),
-                    description: Some("Initialize the Cargo workspace".into()),
-                    priority: Priority::High,
-                    status: TaskStatus::Done,
-                },
-                Task {
-                    id: 2,
-                    title: "Add Axum".into(),
-                    description: Some("Create the HTTP server".into()),
-                    priority: Priority::High,
-                    status: TaskStatus::InProgress,
-                },
-                Task {
-                    id: 3,
-                    title: "Write extractors lesson".into(),
-                    description: None,
-                    priority: Priority::Medium,
-                    status: TaskStatus::Pending,
-                },
-            ];
+        let tasks = vec![
+            Task {
+                id: 1,
+                title: "Set up workspace".into(),
+                description: Some("Initialize the Cargo workspace".into()),
+                priority: Priority::High,
+                status: TaskStatus::Done,
+            },
+            Task {
+                id: 2,
+                title: "Add Axum".into(),
+                description: Some("Create the HTTP server".into()),
+                priority: Priority::High,
+                status: TaskStatus::InProgress,
+            },
+            Task {
+                id: 3,
+                title: "Write extractors lesson".into(),
+                description: None,
+                priority: Priority::Medium,
+                status: TaskStatus::Pending,
+            },
+        ];
         let next_id = tasks.len() as u64 + 1;
 
-        Self {
-            tasks,
-            next_id
-        }
+        Self { tasks, next_id }
     }
 }
 
 // ── Project State ──────────────────────────────────────────────
-
 /// State for task management. Independently lockable.
 #[derive(Clone)]
 pub struct ProjectState(pub Arc<RwLock<ProjectStore>>);
@@ -73,9 +68,31 @@ impl ProjectStore {
     pub fn new() -> Self {
         Self {
             projects: vec![],
-            next_id: 0,
+            next_id: 1,
         }
+    }
+}
 
+// ── Project State ──────────────────────────────────────────────
+#[derive(Clone)]
+pub struct UserState(pub Arc<RwLock<UserStore>>);
+impl UserState {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(UserStore::new())))
+    }
+}
+
+pub struct UserStore {
+    pub users: Vec<User>,
+    pub next_id: u64,
+}
+
+impl UserStore {
+    pub fn new() -> Self {
+        Self {
+            users: vec![],
+            next_id: 1,
+        }
     }
 }
 
@@ -85,6 +102,7 @@ impl ProjectStore {
 pub struct AppState {
     pub tasks: TaskState,
     pub projects: ProjectState,
+    pub users: UserState,
     pub config: AppConfig,
 }
 
@@ -93,6 +111,7 @@ impl AppState {
         Self {
             tasks: TaskState::new(),
             projects: ProjectState::new(),
+            users: UserState::new(),
             config: AppConfig::default(),
         }
     }

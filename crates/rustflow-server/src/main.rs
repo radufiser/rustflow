@@ -27,6 +27,7 @@ async fn main() {
         // Domain routes — nested under /api/*
         .nest("/api/tasks", routes::tasks::router())
         .nest("/api/projects", routes::projects::router())
+        .nest("/api/users", routes::users::router())
         // Provide state to ALL routes (merged and nested)
         .with_state(state);
 
