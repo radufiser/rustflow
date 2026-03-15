@@ -29,35 +29,48 @@ cargo test --workspace
 cargo run -p rustflow-server
 ```
 ```bash
+# Root
+curl -s http://localhost:3000/
+# → RustFlow is running!
 
-# List initial tasks (3 seed tasks)
-curl -s http://localhost:3000/tasks | jq '. | length'
-# → 3
+# Health (merged — no /api prefix)
+curl -s http://localhost:3000/health | jq
 
-# Create a new task — now it persists in state!
-curl -s -X POST http://localhost:3000/tasks \
+# Config (merged — no /api prefix)
+curl -s http://localhost:3000/config | jq
+
+# Tasks (nested under /api)
+curl -s http://localhost:3000/api/tasks | jq
+curl -s http://localhost:3000/api/tasks/1 | jq
+curl -s "http://localhost:3000/api/tasks?status=done" | jq
+curl -s "http://localhost:3000/api/tasks?search=workspace" | jq
+
+# Create a task
+curl -s -X POST http://localhost:3000/api/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title": "New task from 2.6!"}' | jq
+  -d '{"title": "Test nested routing"}' | jq
 
-# List again — should be 4
-curl -s http://localhost:3000/tasks | jq '. | length'
-# → 4
-
-# Create another
-curl -s -X POST http://localhost:3000/tasks \
+# Update a task
+curl -s -X PUT http://localhost:3000/api/tasks/1 \
   -H "Content-Type: application/json" \
-  -d '{"title": "Another task", "priority": "high"}' | jq
-# → id: 5
+  -d '{"title": "Updated title", "priority": "low"}' | jq
+
+# Change task status
+curl -s -X PATCH http://localhost:3000/api/tasks/1/status \
+  -H "Content-Type: application/json" \
+  -d '"done"' | jq
 
 # Delete a task
-curl -i -X DELETE http://localhost:3000/tasks/1
-# → 204 No Content
+curl -i -X DELETE http://localhost:3000/api/tasks/3
 
-# Verify it's gone
-curl -i http://localhost:3000/tasks/1
-# → 404 Not Found
+# Projects (nested under /api)
+curl -s http://localhost:3000/api/projects | jq
 
-# Delete non-existent (404)
-curl -i -X DELETE http://localhost:3000/tasks/999
+# Create a project
+curl -s -X POST http://localhost:3000/api/projects \
+  -H "Content-Type: application/json" \
+  -d '{"name": "New Project"}' | jq
+
+# Old paths no longer work (404)
+curl -i http://localhost:3000/tasks
 # → 404 Not Found
-```
