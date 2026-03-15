@@ -28,6 +28,8 @@ async fn main() {
         .nest("/api/tasks", routes::tasks::router())
         .nest("/api/projects", routes::projects::router())
         .nest("/api/users", routes::users::router())
+        // Enrichment — combines local data with external API calls
+        .nest("/api/enrichment", routes::enrichment::router())
         // Provide state to ALL routes (merged and nested)
         .with_state(state);
 

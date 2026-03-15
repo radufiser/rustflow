@@ -104,6 +104,7 @@ pub struct AppState {
     pub projects: ProjectState,
     pub users: UserState,
     pub config: AppConfig,
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -113,6 +114,7 @@ impl AppState {
             projects: ProjectState::new(),
             users: UserState::new(),
             config: AppConfig::default(),
+            http_client: reqwest::Client::new(),
         }
     }
 }
