@@ -1,3 +1,4 @@
+use crate::errors::RustFlowError;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -15,7 +16,7 @@ async fn list(State(state): State<AppState>) -> Json<Vec<Project>> {
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<u64>,
-) -> Result<Json<Project>, StatusCode> {
+) -> Result<Json<Project>, RustFlowError> {
     let store = state.projects.0.read().await;
     store
         .projects
@@ -23,18 +24,26 @@ async fn get_one(
         .find(|project| project.id == id)
         .cloned()
         .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or(RustFlowError::NotFound(format!(
+            "Project with id {} not found",
+            id
+        )))
 }
 
 /// DELETE /projects/:id
-async fn delete(State(state): State<AppState>, Path(id): Path<u64>) -> StatusCode {
+async fn delete(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, RustFlowError> {
     let mut store = state.projects.0.write().await;
     let len_before = store.projects.len();
     store.projects.retain(|project| project.id != id);
     if store.projects.len() < len_before {
-        StatusCode::NO_CONTENT
+        Ok(StatusCode::NO_CONTENT)
     } else {
-        StatusCode::OK
+        Err(RustFlowError::NotFound(format!(
+            "Project with id {id} does not exist"
+        )))
     }
 }
 
@@ -54,7 +63,6 @@ async fn create(
     store.projects.push(project.clone());
     (StatusCode::CREATED, Json(project))
 }
-
 
 pub fn router() -> Router<AppState> {
     Router::new()

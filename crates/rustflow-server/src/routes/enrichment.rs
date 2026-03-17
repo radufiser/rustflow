@@ -1,11 +1,11 @@
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    http::StatusCode, response::{IntoResponse, Response},
     routing::get,
     Json,
     Router,
 };
+use crate::errors::RustFlowError;
 // -------------- Types ------------
 
 /// A user fetched from the external JSONPlaceholder API
@@ -27,27 +27,6 @@ struct EnrichedTask {
     assign_to: ExternalUser,
 }
 
-// --------- Error handling --------
-enum EnrichmentError {
-    /// The task requested does not exist in our local store
-    TaskNotFound,
-    /// The external API call failed (network error, bad request, etc.
-    ExternalServiceError(String),
-}
-
-impl IntoResponse for EnrichmentError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::TaskNotFound => (StatusCode::NOT_FOUND, "Task not found").into_response(),
-            Self::ExternalServiceError(msg) => (
-                StatusCode::BAD_GATEWAY,
-                format!("External service error: {}", msg),
-            )
-                .into_response(),
-        }
-    }
-}
-
 // --------- Handlers ------------------
 /// GET /api/enrichment/tasks/:task_id/user/:user_id
 ///
@@ -62,7 +41,7 @@ impl IntoResponse for EnrichmentError {
 async fn enrich_task(
     State(state): State<AppState>,
     Path((task_id, user_id)): Path<(u64, u64)>,
-) -> Result<Json<EnrichedTask>, EnrichmentError> {
+) -> Result<Json<EnrichedTask>, RustFlowError> {
     // Step 1: Find the task in the local statement
     //
     // Important: We scope the lock so it is dropped before the HTTP call.
@@ -75,7 +54,7 @@ async fn enrich_task(
             .iter()
             .find(|t| t.id == task_id)
             .cloned()
-            .ok_or(EnrichmentError::TaskNotFound)?
+            .ok_or(RustFlowError::NotFound(format!("Task with id {task_id} not found")))?
     };
     // <- read lock is dropped here (end of the block)
 
@@ -88,14 +67,14 @@ async fn enrich_task(
         // Network or request error (e.g., DNS, connection, timeout)
         .send()
         .await
-        .map_err(|e| EnrichmentError::ExternalServiceError(e.to_string()))?
+        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?
         // HTTP status error (e.g., 404, 500)
         .error_for_status()
-        .map_err(|e| EnrichmentError::ExternalServiceError(e.to_string()))?
+        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?
         // JSON deserialization error (e.g., invalid/mismatched JSON)
         .json()
         .await
-        .map_err(|e| EnrichmentError::ExternalServiceError(e.to_string()))?;
+        .map_err(|e| RustFlowError::ExternalService(e.to_string()))?;
 
     // Step 3: Combine into a rich response
 
@@ -116,16 +95,16 @@ async fn enrich_task(
 /// Useful for testing that the HTTP client works.
 async fn list_external_users(
     State(state): State<AppState>,
-) -> Result<Json<Vec<ExternalUser>>, EnrichmentError> {
+) -> Result<Json<Vec<ExternalUser>>, RustFlowError> {
     let users: Vec<ExternalUser> = state
         .http_client
         .get("https://jsonplaceholder.typicode.com/users")
         .send()
         .await
-        .map_err(|e| EnrichmentError::ExternalServiceError(e.to_string()))?
+        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?
         .json()
         .await
-        .map_err(|e| EnrichmentError::ExternalServiceError(e.to_string()))?;
+        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?;
 
     Ok(Json(users))
 }

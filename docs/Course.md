@@ -136,32 +136,27 @@ rustflow/
     - *Ensure each sub-router has access to the correct shared state*
 - 2.11 - Calling Other Services
     - *Add an endpoint that fetches external data (e.g., enriching a task with user info from a placeholder API)*
-- 2.12 - Returning Status Codes
-    - *Return `201 Created` for new tasks, `404 Not Found` for missing tasks, etc.*
-- 2.13 - Using IntoResponse
-    - *Create consistent API response wrappers for RustFlow*
-- 2.14 - Error Handling with IntoResponse
-    - *Build a unified `RustFlowError` type that maps to appropriate HTTP responses*
-- 2.15 - Quick Recap on Nesting, Making Calls and Responses
-- 2.16 - Serving Static Content with Tower
+- 2.12 - Unified Error Handling
+    - *Build a unified `RustFlowError` type that maps to consistent, structured JSON error responses*
+- 2.13 - Serving Static Content with Tower
     - *Serve a simple RustFlow dashboard HTML page at `/`*
-- 2.17 - Simple Header-Based Authentication
+- 2.14 - Simple Header-Based Authentication
     - *Protect task mutation endpoints with an API key header*
-- 2.18 - Simple Header-Based Auth with Middleware
+- 2.15 - Simple Header-Based Auth with Middleware
     - *Refactor auth into a reusable middleware layer*
-- 2.19 - Middleware Auth with Injection
+- 2.16 - Middleware Auth with Injection
     - *Inject the authenticated user identity into request extensions*
-- 2.20 - Selectively Applying Layers
+- 2.17 - Selectively Applying Layers
     - *Apply auth only to write endpoints; leave read endpoints open*
-- 2.21 - CORS Configuration
+- 2.18 - CORS Configuration
     - *Configure CORS so the RustFlow dashboard (or external frontends) can call the API*
-- 2.22 - Rate Limiting with Tower
+- 2.19 - Rate Limiting with Tower
     - *Add rate limiting to protect public-facing RustFlow endpoints*
-- 2.23 - Router Layers
+- 2.20 - Router Layers
     - *Organize all middleware into a clean, composable layer stack*
-- 2.24 - Graceful Shutdown
+- 2.21 - Graceful Shutdown
     - *Handle `SIGTERM`/`SIGINT` to drain in-flight requests before stopping RustFlow*
-- 2.25 - Layer Recap
+- 2.22 - Layer Recap
 
 ---
 

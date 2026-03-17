@@ -1,3 +1,5 @@
+use std::fmt::format;
+use crate::errors::RustFlowError;
 use crate::extractors::{ValidatedJson, ValidatedQuery};
 use crate::state::AppState;
 use axum::extract::{Path, State};
@@ -39,7 +41,7 @@ async fn list(
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<u64>,
-) -> Result<Json<Task>, StatusCode> {
+) -> Result<Json<Task>, RustFlowError> {
     let store = state.tasks.0.read().await;
 
     store
@@ -48,15 +50,22 @@ async fn get_one(
         .find(|task| task.id == id)
         .cloned()
         .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or(RustFlowError::NotFound(format!(
+            "Task with id {} does not exist",
+            id
+        )))
 }
 
 async fn create(
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
-) -> (StatusCode, Json<Task>) {
+) -> Result<(StatusCode, Json<Task>), RustFlowError> {
     // Acquire a write lock - exclusive access, blocks all other readers/writers
     let mut store = state.tasks.0.write().await;
+
+    if store.tasks.iter().any(|x| payload.title == x.title) {
+        return Err(RustFlowError::Conflict(format!("Task with title {} already exists", payload.title)));
+    }
 
     let task = Task {
         id: store.next_id,
@@ -69,19 +78,21 @@ async fn create(
     store.next_id += 1;
     store.tasks.push(task.clone());
 
-    (StatusCode::CREATED, Json(task))
+    Ok((StatusCode::CREATED, Json(task)))
 }
 
-async fn delete(State(state): State<AppState>, Path(id): Path<u64>) -> StatusCode {
+async fn delete(State(state): State<AppState>, Path(id): Path<u64>) -> Result<StatusCode, RustFlowError> {
     let mut store = state.tasks.0.write().await;
     let len_before = store.tasks.len();
 
     store.tasks.retain(|task| task.id != id);
 
     if store.tasks.len() < len_before {
-        StatusCode::NO_CONTENT
+        Ok(StatusCode::NO_CONTENT)
     } else {
-        StatusCode::NOT_FOUND
+        Err(RustFlowError::NotFound(
+            format!("Task with id {id} does not exist"),
+        ))
     }
 }
 
@@ -89,7 +100,7 @@ async fn update(
     State(state): State<AppState>,
     Path(id): Path<u64>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
-) -> Result<Json<Task>, StatusCode> {
+) -> Result<Json<Task>, RustFlowError> {
     let mut store = state.tasks.0.write().await;
 
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
@@ -98,7 +109,10 @@ async fn update(
         task.priority = payload.priority;
         Ok(Json(task.clone()))
     } else {
-        Err(StatusCode::NOT_FOUND)
+        Err(RustFlowError::NotFound(format!(
+            "Task with id {} does not exist",
+            id
+        )))
     }
 }
 
@@ -106,14 +120,17 @@ async fn change_status(
     State(state): State<AppState>,
     Path(id): Path<u64>,
     Json(payload): Json<TaskStatus>,
-) -> Result<Json<Task>, StatusCode> {
+) -> Result<Json<Task>, RustFlowError> {
     let mut store = state.tasks.0.write().await;
 
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
         task.status = payload;
         Ok(Json(task.clone()))
     } else {
-        Err(StatusCode::NOT_FOUND)
+        Err(RustFlowError::NotFound(format!(
+            "Task with id {} does not exist",
+            id
+        )))
     }
 }
 
