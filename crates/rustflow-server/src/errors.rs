@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use reqwest::StatusCode;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// A single error type for all RustFlow handler errors.
 ///
@@ -52,6 +53,7 @@ impl IntoResponse for RustFlowError {
         };
 
         let body = serde_json::json!({
+            "request_id": Uuid::new_v4().to_string(),
             "error": error,
             "details": details
         });
