@@ -4,24 +4,27 @@ mod state;
 mod errors;
 
 use crate::state::AppState;
-use axum::{routing::get, Router};
+use axum::Router;
 use rustflow_common::{
     APP_NAME, APP_VERSION
 };
 use tokio::net::TcpListener;
-
-/// Root endpoint - a simple liveness message
-async fn root() -> &'static str {
-    "RustFlow is running!"
-}
+use tower_http::services::{ServeDir, ServeFile};
 
 #[tokio::main]
 async fn main() {
     let state: AppState = AppState::new();
     // Build the application router
     let app = Router::new()
-        // Root liveness
-        .route("/", get(root))
+        // Serve the dashboard at root
+        .route_service("/", ServeFile::new("crates/rustflow-server/static/index.html"))
+        // Serve static files from /static/* — automatically serves index.html for directory requests
+        .nest_service(
+            "/static",
+            ServeDir::new("crates/rustflow-server/static")
+                .append_index_html_on_directories(true)
+        )
+        .route_service("/favicon.ico", ServeFile::new("crates/rustflow-server/static/favicon.ico"))
         // Health & config — merged at root level (no prefix)
         .merge(routes::health::router())
         // Domain routes — nested under /api/*

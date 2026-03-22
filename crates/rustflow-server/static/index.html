@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RustFlow Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+    <h1>⚡ RustFlow <span>Dashboard</span></h1>
+    <div class="status-badge" id="status">Connected</div>
+</header>
+
+<main>
+    <div class="error-banner" id="error"></div>
+
+    <div class="cards">
+        <div class="card">
+            <div class="card-label">Total Tasks</div>
+            <div class="card-value primary" id="total-tasks">–</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Pending</div>
+            <div class="card-value" id="pending-tasks">–</div>
+        </div>
+        <div class="card">
+            <div class="card-label">In Progress</div>
+            <div class="card-value info" id="inprogress-tasks">–</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Done</div>
+            <div class="card-value success" id="done-tasks">–</div>
+        </div>
+    </div>
+
+    <h2>Tasks</h2>
+    <table>
+        <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Priority</th>
+            <th>Status</th>
+        </tr>
+        </thead>
+        <tbody id="task-table">
+        <tr><td colspan="4" style="text-align:center;color:var(--text-muted)">
+            Loading…
+        </td></tr>
+        </tbody>
+    </table>
+</main>
+
+<footer>RustFlow — built with Rust, Axum &amp; Tower</footer>
+
+<script>
+    const API = '/api/tasks';
+
+    function badgeClass(status) {
+        if (status === 'inprogress') return 'badge-inprogress';
+        return 'badge-' + status;
+    }
+
+    async function load() {
+        try {
+            const res = await fetch(API);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const tasks = await res.json();
+
+            // Update summary cards
+            document.getElementById('total-tasks').textContent = tasks.length;
+            document.getElementById('pending-tasks').textContent =
+                tasks.filter(t => t.status === 'pending').length;
+            document.getElementById('inprogress-tasks').textContent =
+                tasks.filter(t => t.status === 'inprogress').length;
+            document.getElementById('done-tasks').textContent =
+                tasks.filter(t => t.status === 'done').length;
+
+            // Update task table
+            const tbody = document.getElementById('task-table');
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" ' +
+                    'style="text-align:center;color:var(--text-muted)">' +
+                    'No tasks yet</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = tasks.map(t => `
+                    <tr>
+                        <td>#${t.id}</td>
+                        <td>${t.title}</td>
+                        <td><span class="badge badge-${t.priority}">${t.priority}</span></td>
+                        <td><span class="badge ${badgeClass(t.status)}">${t.status}</span></td>
+                    </tr>
+                `).join('');
+
+            document.getElementById('error').style.display = 'none';
+        } catch (err) {
+            document.getElementById('error').textContent =
+                'Failed to load tasks: ' + err.message;
+            document.getElementById('error').style.display = 'block';
+        }
+    }
+
+    // Load immediately, then poll every 5 seconds
+    load();
+    setInterval(load, 5000);
+</script>
+</body>
+</html>
