@@ -1,6 +1,5 @@
-use std::fmt::format;
 use crate::errors::RustFlowError;
-use crate::extractors::{ValidatedJson, ValidatedQuery};
+use crate::extractors::{RequireApiKey, ValidatedJson, ValidatedQuery};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -57,6 +56,7 @@ async fn get_one(
 }
 
 async fn create(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), RustFlowError> {
@@ -64,7 +64,10 @@ async fn create(
     let mut store = state.tasks.0.write().await;
 
     if store.tasks.iter().any(|x| payload.title == x.title) {
-        return Err(RustFlowError::Conflict(format!("Task with title {} already exists", payload.title)));
+        return Err(RustFlowError::Conflict(format!(
+            "Task with title {} already exists",
+            payload.title
+        )));
     }
 
     let task = Task {
@@ -81,7 +84,11 @@ async fn create(
     Ok((StatusCode::CREATED, Json(task)))
 }
 
-async fn delete(State(state): State<AppState>, Path(id): Path<u64>) -> Result<StatusCode, RustFlowError> {
+async fn delete(
+    _auth: RequireApiKey,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, RustFlowError> {
     let mut store = state.tasks.0.write().await;
     let len_before = store.tasks.len();
 
@@ -90,13 +97,14 @@ async fn delete(State(state): State<AppState>, Path(id): Path<u64>) -> Result<St
     if store.tasks.len() < len_before {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(RustFlowError::NotFound(
-            format!("Task with id {id} does not exist"),
-        ))
+        Err(RustFlowError::NotFound(format!(
+            "Task with id {id} does not exist"
+        )))
     }
 }
 
 async fn update(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
@@ -117,6 +125,7 @@ async fn update(
 }
 
 async fn change_status(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     Json(payload): Json<TaskStatus>,

@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use rustflow_common::{CreateProject, Project};
+use crate::extractors::RequireApiKey;
 
 /// GET /projects
 async fn list(State(state): State<AppState>) -> Json<Vec<Project>> {
@@ -32,6 +33,7 @@ async fn get_one(
 
 /// DELETE /projects/:id
 async fn delete(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -49,6 +51,7 @@ async fn delete(
 
 /// POST /projects
 async fn create(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Json(payload): Json<CreateProject>,
 ) -> (StatusCode, Json<Project>) {

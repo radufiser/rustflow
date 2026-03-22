@@ -31,6 +31,10 @@ pub enum RustFlowError {
     Internal(String),
     #[error("Conflict error `{0}`")]
     Conflict(String),
+    #[error("Unauthorized `{0}`")]
+    Unauthorized(String),
+    #[error("Forbidden `{0}`")]
+    Forbidden(String),
 }
 
 impl IntoResponse for RustFlowError {
@@ -50,6 +54,8 @@ impl IntoResponse for RustFlowError {
                 msg,
             ),
             Self::Conflict(msg) => (StatusCode::CONFLICT, "Conflict error", msg),
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "Unauthorized", msg),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, "Forbidden", msg),
         };
 
         let body = serde_json::json!({

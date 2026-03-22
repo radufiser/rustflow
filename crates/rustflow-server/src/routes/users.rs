@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use rustflow_common::{CreateUser, User};
+use crate::extractors::RequireApiKey;
 
 async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
     let store = state.users.0.read().await;
@@ -12,6 +13,7 @@ async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
 }
 
 async fn create(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Json(payload): Json<CreateUser>,
 ) -> (StatusCode, Json<User>) {
@@ -30,6 +32,7 @@ async fn create(
 }
 
 async fn delete(
+    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
