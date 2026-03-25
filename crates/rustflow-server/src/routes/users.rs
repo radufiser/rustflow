@@ -3,9 +3,9 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{middleware, Json, Router};
 use rustflow_common::{CreateUser, User};
-use crate::extractors::RequireApiKey;
+use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
     let store = state.users.0.read().await;
@@ -13,7 +13,6 @@ async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
 }
 
 async fn create(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Json(payload): Json<CreateUser>,
 ) -> (StatusCode, Json<User>) {
@@ -32,7 +31,6 @@ async fn create(
 }
 
 async fn delete(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -50,19 +48,28 @@ async fn delete(
     }
 }
 
-async fn get_one(State(state): State<AppState>, Path(id): Path<u64>) -> Result<(StatusCode, Json<User>), RustFlowError> {
+async fn get_one(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<(StatusCode, Json<User>), RustFlowError> {
     let store = state.users.0.read().await;
     let found_user = store.users.iter().find(|user| user.id == id);
 
     if let Some(user) = found_user {
         Ok((StatusCode::OK, Json(user.clone())))
     } else {
-        Err(RustFlowError::NotFound(format!("User with id {} not found", id)))
+        Err(RustFlowError::NotFound(format!(
+            "User with id {} not found",
+            id
+        )))
     }
 }
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
-        .route("/users", get(list).post(create))
-        .route("/users/{id}", get(get_one).delete(delete))
+        .route("/", get(list).post(create))
+        .route("/{id}", get(get_one).delete(delete))
+        .layer(middleware::from_fn_with_state(state, require_api_key))
+        .layer(middleware::from_fn(log_request))
+        .layer(middleware::from_fn(log_elapsed_time))
 }

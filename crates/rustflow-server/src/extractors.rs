@@ -1,4 +1,3 @@
-use crate::errors::RustFlowError;
 use axum::{
     extract::{
         rejection::JsonRejection, rejection::QueryRejection, FromRequest, FromRequestParts, Query,
@@ -9,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rustflow_common::API_KEY;
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
@@ -130,26 +128,5 @@ where
 
         // Step 3: Both passed
         Ok(ValidatedQuery(value))
-    }
-}
-
-pub struct RequireApiKey;
-
-impl<S> FromRequestParts<S> for RequireApiKey
-where
-    S: Send + Sync,
-{
-    type Rejection = RustFlowError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let api_key = parts
-            .headers
-            .get("x-api-key")
-            .and_then(|value| value.to_str().ok());
-        match api_key {
-            None => Err(RustFlowError::Unauthorized("Missing x-api-key".into())),
-            Some(key) if key == API_KEY => Ok(RequireApiKey),
-            Some(_) => Err(RustFlowError::Forbidden("Invalid API key".into())),
-        }
     }
 }

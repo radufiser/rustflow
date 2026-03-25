@@ -3,9 +3,9 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{middleware, Json, Router};
 use rustflow_common::{CreateProject, Project};
-use crate::extractors::RequireApiKey;
+use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 /// GET /projects
 async fn list(State(state): State<AppState>) -> Json<Vec<Project>> {
@@ -33,7 +33,6 @@ async fn get_one(
 
 /// DELETE /projects/:id
 async fn delete(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -51,7 +50,6 @@ async fn delete(
 
 /// POST /projects
 async fn create(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Json(payload): Json<CreateProject>,
 ) -> (StatusCode, Json<Project>) {
@@ -67,8 +65,11 @@ async fn create(
     (StatusCode::CREATED, Json(project))
 }
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", get(list).post(create))
         .route("/{id}", get(get_one).delete(delete))
+        .layer(middleware::from_fn_with_state(state, require_api_key))
+        .layer(middleware::from_fn(log_request))
+        .layer(middleware::from_fn(log_elapsed_time))
 }

@@ -28,9 +28,9 @@ async fn main() {
         // Health & config — merged at root level (no prefix)
         .merge(routes::health::router())
         // Domain routes — nested under /api/*
-        .nest("/api/tasks", routes::tasks::router())
-        .nest("/api/projects", routes::projects::router())
-        .nest("/api/users", routes::users::router())
+        .nest("/api/tasks", routes::tasks::router(state.clone()))
+        .nest("/api/projects", routes::projects::router(state.clone()))
+        .nest("/api/users", routes::users::router(state.clone()))
         // Enrichment — combines local data with external API calls
         .nest("/api/enrichment", routes::enrichment::router())
         // Provide state to ALL routes (merged and nested)

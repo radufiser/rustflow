@@ -1,11 +1,12 @@
 use crate::errors::RustFlowError;
-use crate::extractors::{RequireApiKey, ValidatedJson, ValidatedQuery};
+use crate::extractors::{ValidatedJson, ValidatedQuery};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch};
-use axum::{Json, Router};
+use axum::{middleware, Json, Router};
 use rustflow_common::{CreateTask, Task, TaskFilter, TaskStatus};
+use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 /// GET /tasks?status=pending&priority=high
 ///
@@ -56,7 +57,6 @@ async fn get_one(
 }
 
 async fn create(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), RustFlowError> {
@@ -85,7 +85,6 @@ async fn create(
 }
 
 async fn delete(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -104,7 +103,6 @@ async fn delete(
 }
 
 async fn update(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
@@ -125,7 +123,6 @@ async fn update(
 }
 
 async fn change_status(
-    _auth: RequireApiKey,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     Json(payload): Json<TaskStatus>,
@@ -143,9 +140,12 @@ async fn change_status(
     }
 }
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/", get(list).post(create))
         .route("/{id}", get(get_one).put(update).delete(delete))
         .route("/{id}/status", patch(change_status))
+        .layer(middleware::from_fn_with_state(state, require_api_key))
+        .layer(middleware::from_fn(log_request))
+        .layer(middleware::from_fn(log_elapsed_time))
 }
