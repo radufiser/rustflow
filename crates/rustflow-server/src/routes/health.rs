@@ -1,13 +1,30 @@
-use axum::{extract::State, routing::get, Json, Router};
-use rustflow_common::AppConfig;
+use axum::{extract::State, routing::get, Extension, Json, Router};
+use rustflow_common::{AppConfig, AuthenticatedClient};
 use crate::state::AppState;
 
-/// Health check endpoint - returns structured JSON about the service
-async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+/// Health check endpoint - returns structured JSON about the service.
+///
+/// Demonstrates **optional extension extraction**: this route has NO auth
+/// middleware, so `AuthenticatedClient` is never injected.  Using
+/// `Option<Extension<T>>` lets the handler work either way — `None` when
+/// unauthenticated, `Some(client)` if the middleware happened to run.
+///
+/// If we used `Extension<AuthenticatedClient>` (non-optional) here, Axum
+/// would return `500 Internal Server Error` because the extension is missing.
+async fn health(
+    auth: Option<Extension<AuthenticatedClient>>,
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let caller = match auth {
+        Some(Extension(client)) => client.name,
+        None => "anonymous".to_string(),
+    };
+
     Json(serde_json::json!({
         "service": state.config.app_name,
         "version": state.config.version,
-        "status": "ok"
+        "status": "ok",
+        "caller": caller
     }))
 }
 

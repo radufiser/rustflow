@@ -5,6 +5,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rustflow_common::AuthenticatedClient;
 use std::time::Instant;
+use axum::http::HeaderValue;
 
 /// Middleware that validates the `x-api-key` header and injects the
 /// authenticated client identity into request extensions.
@@ -37,11 +38,16 @@ pub async fn require_api_key(
     match api_key {
         None => RustFlowError::Unauthorized("Missing x-api-key header".into()).into_response(),
         Some(key) => {
-            if let Some(client_name) = state.api_keys.get(key) {
+            if let Some((client_name, role)) = state.api_keys.get(key) {
                 request.extensions_mut().insert(AuthenticatedClient {
                     name: client_name.clone(),
+                    role: role.clone(),
                 });
-                next.run(request).await
+                let mut response = next.run(request).await;
+                if let Ok(value) = HeaderValue::from_str(&client_name) {
+                    response.headers_mut().append("x-authenticated-as", value);
+                }
+                response
             } else {
                 RustFlowError::Forbidden("Invalid x-api-key header".into()).into_response()
             }

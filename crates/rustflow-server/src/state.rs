@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use rustflow_common::{AppConfig, Priority, Project, Task, TaskStatus, User};
+use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -99,6 +100,13 @@ impl UserStore {
 
 // Composite App State
 
+#[derive(serde::Deserialize)]
+struct ApiKeyEntry {
+    key_name: String,
+    user_name: String,
+    role: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub tasks: TaskState,
@@ -106,31 +114,29 @@ pub struct AppState {
     pub users: UserState,
     pub config: AppConfig,
     pub http_client: reqwest::Client,
-    pub api_keys: HashMap<String, String>,
+    pub api_keys: HashMap<String, (String, String)>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        let mut api_keys = HashMap::new();
-        api_keys.insert(
-            "rustflow-api-key-2026".to_string(),
-            "default".to_string(),
-        );
-        api_keys.insert(
-            "ci-bot-key-2026".to_string(),
-            "ci-bot".to_string(),
-        );
-        api_keys.insert(
-            "admin-key-2026".to_string(),
-            "admin".to_string(),
-        );
+        let entries: Vec<ApiKeyEntry> =
+            serde_json::from_str(
+                &fs::read_to_string("crates/rustflow-server/config/api_keys.json")
+                    .expect("Failed to read api_keys.json"),
+            )
+            .expect("Failed to parse api_keys.json");
+
+        let api_keys: HashMap<String, (String, String)> = entries
+            .into_iter()
+            .map(|e| (e.key_name, (e.user_name, e.role)))
+            .collect();
         Self {
             tasks: TaskState::new(),
             projects: ProjectState::new(),
             users: UserState::new(),
             config: AppConfig::default(),
             http_client: reqwest::Client::new(),
-            api_keys
+            api_keys,
         }
     }
 }

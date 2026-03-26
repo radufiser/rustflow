@@ -3,8 +3,8 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{middleware, Json, Router};
-use rustflow_common::{CreateProject, Project};
+use axum::{middleware, Extension, Json, Router};
+use rustflow_common::{AuthenticatedClient, CreateProject, Project};
 use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 /// GET /projects
@@ -33,6 +33,7 @@ async fn get_one(
 
 /// DELETE /projects/:id
 async fn delete(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -40,6 +41,7 @@ async fn delete(
     let len_before = store.projects.len();
     store.projects.retain(|project| project.id != id);
     if store.projects.len() < len_before {
+        println!("[audit] Project {} deleted by client '{}'", id, client.name);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -50,6 +52,7 @@ async fn delete(
 
 /// POST /projects
 async fn create(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     Json(payload): Json<CreateProject>,
 ) -> (StatusCode, Json<Project>) {
@@ -62,6 +65,7 @@ async fn create(
     };
     store.next_id += 1;
     store.projects.push(project.clone());
+    println!("[audit] Project {} created by client '{}'", project.id, client.name);
     (StatusCode::CREATED, Json(project))
 }
 

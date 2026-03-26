@@ -1,0 +1,5 @@
+[
+  { "key_name": "rustflow-api-key-2026", "user_name": "default", "role": "reader" },
+  { "key_name": "ci-bot-key-2026", "user_name": "ci-bot", "role": "ci" },
+  { "key_name": "admin-key-2026", "user_name": "admin", "role": "admin" }
+]
