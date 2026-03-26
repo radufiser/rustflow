@@ -1,22 +1,25 @@
 use crate::errors::RustFlowError;
 use crate::extractors::{ValidatedJson, ValidatedQuery};
+use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, patch};
+use axum::routing::{get, patch, post, put};
 use axum::{middleware, Extension, Json, Router};
 use rustflow_common::{AuthenticatedClient, CreateTask, Task, TaskFilter, TaskStatus};
-use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
+
+// ── Read handlers (public) ──────────────────────────────────
 
 /// GET /tasks?status=pending&priority=high
 ///
-/// The ValidatedQuery extractor deserializes and validates query parameters into a TaskFilter struct.
+/// Uses `Option<Extension<AuthenticatedClient>>` so it works with or without
+/// the auth middleware. When a key is provided, the client name is logged.
 async fn list(
     auth: Option<Extension<AuthenticatedClient>>,
     State(state): State<AppState>,
     ValidatedQuery(filter): ValidatedQuery<TaskFilter>,
 ) -> Json<Vec<Task>> {
-    if let Some(client) = auth {
+    if let Some(Extension(client)) = auth {
         println!("Listing tasks for authenticated client {}", client.name);
     }
     let state = state.tasks.0.read().await;
@@ -25,7 +28,7 @@ async fn list(
         .tasks
         .iter()
         .filter(|task| filter.status.as_ref().map_or(true, |s| &task.status == s))
-        .filter(|task| filter.status.as_ref().map_or(true, |s| &task.status == s))
+        .filter(|task| filter.priority.as_ref().map_or(true, |p| &task.priority == p))
         .filter(|task| {
             filter.search.as_ref().map_or(true, |s| {
                 task.title.contains(s) || task.description.as_ref().map_or(false, |d| d.contains(s))
@@ -152,12 +155,23 @@ async fn change_status(
     }
 }
 
+// ── Router ──────────────────────────────────────────────────
+
 pub fn router(state: AppState) -> Router<AppState> {
-    Router::new()
-        .route("/", get(list).post(create))
-        .route("/{id}", get(get_one).put(update).delete(delete))
+    // Public routes — no authentication required
+    let public = Router::new()
+        .route("/", get(list))
+        .route("/{id}", get(get_one));
+
+    // Protected routes — require valid API key, identity injected
+    let protected = Router::new()
+        .route("/", post(create))
+        .route("/{id}", put(update).delete(delete))
         .route("/{id}/status", patch(change_status))
-        .layer(middleware::from_fn_with_state(state, require_api_key))
+        .layer(middleware::from_fn_with_state(state, require_api_key));
+
+    // Merge and apply logging to all routes
+    public.merge(protected)
         .layer(middleware::from_fn(log_request))
         .layer(middleware::from_fn(log_elapsed_time))
 }

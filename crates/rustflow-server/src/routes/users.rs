@@ -1,11 +1,11 @@
 use crate::errors::RustFlowError;
+use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{middleware, Json, Router};
 use rustflow_common::{CreateUser, User};
-use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
     let store = state.users.0.read().await;
@@ -66,10 +66,16 @@ async fn get_one(
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
-    Router::new()
-        .route("/", get(list).post(create))
-        .route("/{id}", get(get_one).delete(delete))
-        .layer(middleware::from_fn_with_state(state, require_api_key))
+    let public = Router::new()
+        .route("/", get(list))
+        .route("/{id}", get(get_one));
+
+    let protected = Router::new()
+        .route("/", post(create))
+        .route("/{id}", axum::routing::delete(delete))
+        .layer(middleware::from_fn_with_state(state, require_api_key));
+
+    public.merge(protected)
         .layer(middleware::from_fn(log_request))
         .layer(middleware::from_fn(log_elapsed_time))
 }
