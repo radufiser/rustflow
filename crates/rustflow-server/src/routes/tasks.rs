@@ -4,17 +4,21 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch};
-use axum::{middleware, Json, Router};
-use rustflow_common::{CreateTask, Task, TaskFilter, TaskStatus};
+use axum::{middleware, Extension, Json, Router};
+use rustflow_common::{AuthenticatedClient, CreateTask, Task, TaskFilter, TaskStatus};
 use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
 
 /// GET /tasks?status=pending&priority=high
 ///
 /// The ValidatedQuery extractor deserializes and validates query parameters into a TaskFilter struct.
 async fn list(
+    auth: Option<Extension<AuthenticatedClient>>,
     State(state): State<AppState>,
     ValidatedQuery(filter): ValidatedQuery<TaskFilter>,
 ) -> Json<Vec<Task>> {
+    if let Some(client) = auth {
+        println!("Listing tasks for authenticated client {}", client.name);
+    }
     let state = state.tasks.0.read().await;
 
     let filtered: Vec<Task> = state
@@ -57,6 +61,7 @@ async fn get_one(
 }
 
 async fn create(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), RustFlowError> {
@@ -80,11 +85,13 @@ async fn create(
 
     store.next_id += 1;
     store.tasks.push(task.clone());
+    println!("[audit] Task {} created by client '{}'", task.id, client.name);
 
     Ok((StatusCode::CREATED, Json(task)))
 }
 
 async fn delete(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<StatusCode, RustFlowError> {
@@ -94,6 +101,7 @@ async fn delete(
     store.tasks.retain(|task| task.id != id);
 
     if store.tasks.len() < len_before {
+        println!("[audit] Task {id} deleted by client '{}'", client.name);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -103,6 +111,7 @@ async fn delete(
 }
 
 async fn update(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     ValidatedJson(payload): ValidatedJson<CreateTask>,
@@ -113,6 +122,7 @@ async fn update(
         task.title = payload.title;
         task.description = payload.description;
         task.priority = payload.priority;
+        println!("[audit] Task {id} updated by client '{}'", client.name);
         Ok(Json(task.clone()))
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -123,6 +133,7 @@ async fn update(
 }
 
 async fn change_status(
+    Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
     Path(id): Path<u64>,
     Json(payload): Json<TaskStatus>,
@@ -131,6 +142,7 @@ async fn change_status(
 
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
         task.status = payload;
+        println!("[audit] Task {id} status changed by client '{}'", client.name);
         Ok(Json(task.clone()))
     } else {
         Err(RustFlowError::NotFound(format!(

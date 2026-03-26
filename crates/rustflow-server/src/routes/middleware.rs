@@ -1,11 +1,34 @@
-use std::time::Instant;
 use crate::errors::RustFlowError;
+use crate::state::AppState;
 use axum::extract::{OriginalUri, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use crate::state::AppState;
+use rustflow_common::AuthenticatedClient;
+use std::time::Instant;
 
-pub async fn require_api_key(State(state): State<AppState>, request: Request, next: Next) -> Response {
+/// Middleware that validates the `x-api-key` header and injects the
+/// authenticated client identity into request extensions.
+///
+/// Applied to a router with:
+/// ```ignore
+/// Router::new()
+///     .route("/", post(create))
+///     .layer(middleware::from_fn_with_state(state.clone(), require_api_key))
+/// ```
+///
+/// After this middleware runs, handlers can extract the identity:
+/// ```ignore
+/// async fn create(
+///     Extension(client): Extension<AuthenticatedClient>,
+///     ...
+/// ) {
+///     println!("Created by: {}", client.name);
+/// }
+/// ```
+pub async fn require_api_key(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next) -> Response {
     let api_key = request
         .headers()
         .get("X-API-KEY")
@@ -13,8 +36,16 @@ pub async fn require_api_key(State(state): State<AppState>, request: Request, ne
 
     match api_key {
         None => RustFlowError::Unauthorized("Missing x-api-key header".into()).into_response(),
-        Some(api_key) if api_key == state.config.api_key => next.run(request).await,
-        Some(_) => RustFlowError::Forbidden("Invalid x-api-key header".into()).into_response(),
+        Some(key) => {
+            if let Some(client_name) = state.api_keys.get(key) {
+                request.extensions_mut().insert(AuthenticatedClient {
+                    name: client_name.clone(),
+                });
+                next.run(request).await
+            } else {
+                RustFlowError::Forbidden("Invalid x-api-key header".into()).into_response()
+            }
+        }
     }
 }
 

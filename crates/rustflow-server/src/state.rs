@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use rustflow_common::{AppConfig, Priority, Project, Task, TaskStatus, User};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -105,16 +106,31 @@ pub struct AppState {
     pub users: UserState,
     pub config: AppConfig,
     pub http_client: reqwest::Client,
+    pub api_keys: HashMap<String, String>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let mut api_keys = HashMap::new();
+        api_keys.insert(
+            "rustflow-api-key-2026".to_string(),
+            "default".to_string(),
+        );
+        api_keys.insert(
+            "ci-bot-key-2026".to_string(),
+            "ci-bot".to_string(),
+        );
+        api_keys.insert(
+            "admin-key-2026".to_string(),
+            "admin".to_string(),
+        );
         Self {
             tasks: TaskState::new(),
             projects: ProjectState::new(),
             users: UserState::new(),
             config: AppConfig::default(),
             http_client: reqwest::Client::new(),
+            api_keys
         }
     }
 }
