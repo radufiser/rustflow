@@ -18,7 +18,12 @@ async fn main() {
 
     // CORS configuration
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
+        // Each parse returns Result — filter_map discards any that fail to parse
+        .allow_origin(
+            state.config.cors_origins.iter()
+                .filter_map(|o| o.parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>()
+        )
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -30,7 +35,17 @@ async fn main() {
             HeaderName::from_static("content-type"),
             HeaderName::from_static("x-api-key"),
         ])
+//       .allow_credentials(true) panics
+        .expose_headers([HeaderName::from_static("x-authenticated-as")])
         .max_age(Duration::from_secs(3600));
+
+    let api = Router::new()
+        .nest("/tasks", routes::tasks::router(state.clone()))
+        .nest("/projects", routes::projects::router(state.clone()))
+        .nest("/users", routes::users::router(state.clone()))
+        // Enrichment — combines local data with external API calls
+        .nest("/enrichment", routes::enrichment::router())
+        .layer(cors);
 
     // Build the application router
     let app = Router::new()
@@ -51,15 +66,9 @@ async fn main() {
         // Health & config — merged at root level (no prefix)
         .merge(routes::health::router())
         // Domain routes — nested under /api/*
-        .nest("/api/tasks", routes::tasks::router(state.clone()))
-        .nest("/api/projects", routes::projects::router(state.clone()))
-        .nest("/api/users", routes::users::router(state.clone()))
-        // Enrichment — combines local data with external API calls
-        .nest("/api/enrichment", routes::enrichment::router())
+        .nest("/api", api)
         // Provide state to ALL routes (merged and nested)
-        .with_state(state)
-        // CORS — outermost layer, runs first on every request
-        .layer(cors);
+        .with_state(state);
 
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)

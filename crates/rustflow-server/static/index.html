@@ -68,6 +68,8 @@
                 headers: { "x-api-key": "rustflow-api-key-2026" }
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const authenticatedAs = res.headers.get('x-authenticated-as');
+            console.log("Authenticated as: ", authenticatedAs);
             const tasks = await res.json();
 
             // Update summary cards
