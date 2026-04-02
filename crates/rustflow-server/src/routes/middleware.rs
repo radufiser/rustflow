@@ -5,7 +5,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rustflow_common::AuthenticatedClient;
 use std::time::Instant;
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, StatusCode};
 
 /// Middleware that validates the `x-api-key` header and injects the
 /// authenticated client identity into request extensions.
@@ -74,5 +74,3 @@ pub async fn log_elapsed_time(request: Request, next: Next) -> Response {
     println!("Took {} mu", Instant::now().duration_since(start).as_micros() as f64);
     response
 }
-
-
