@@ -35,6 +35,8 @@ pub enum RustFlowError {
     Unauthorized(String),
     #[error("Forbidden `{0}`")]
     Forbidden(String),
+    #[error("Too many requests")]
+    RateLimited,
 }
 
 impl IntoResponse for RustFlowError {
@@ -56,6 +58,11 @@ impl IntoResponse for RustFlowError {
             Self::Conflict(msg) => (StatusCode::CONFLICT, "Conflict error", msg),
             Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "Unauthorized", msg),
             Self::Forbidden(msg) => (StatusCode::FORBIDDEN, "Forbidden", msg),
+            Self::RateLimited => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many requests",
+                "Rate limit exceeded. Please try again.".to_string(),
+            ),
         };
 
         let body = serde_json::json!({
@@ -67,5 +74,3 @@ impl IntoResponse for RustFlowError {
         (status, Json(body)).into_response()
     }
 }
-
-

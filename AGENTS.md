@@ -88,19 +88,38 @@ All crates use `edition = "2024"`.
 
 ## Course-Driven Development
 
-Current state: **Section 2.17** (selective auth layers completed).
+Current state: **Section 2.20** (router layers reorganized — rate limiting, CORS, logging applied at correct scopes).
 
-**Next sections** (docs exist in `/docs/sections/`, ready to implement):
-- 2.18 — CORS Configuration
-- 2.19 — Rate Limiting with Tower
-- 2.20 — Router Layers (reorganize middleware with `ServiceBuilder`)
+**Next section** (doc exists in `/docs/sections/`, ready to implement):
 - 2.21 — Graceful Shutdown
 
 **Patterns established so far:**
 - Auth middleware with identity injection (`middleware.rs` → `AuthenticatedClient` in extensions)
 - Public/protected router splitting (reads open, writes require API key)
 - API keys loaded from `config/api_keys.json` at startup
-- Per-module logging middleware (`log_request`, `log_elapsed_time`)
+- CORS configured from `AppConfig.cors_origins` (dynamic origin list)
+- Rate limiting via `ServiceBuilder` stack: `HandleErrorLayer` → `LoadShedLayer` → `BufferLayer` → `RateLimitLayer`
+- Router groups by middleware scope: static (none), health (merged at root), API (CORS + rate limiting)
+- Chained `.layer()` ordering: **last applied = outermost** (runs first on request)
+
+### Tower Layer Stack Pattern (CRITICAL)
+Bare `RateLimitLayer` / `LoadShedLayer` won't compile with Axum — two fixes required:
+- `BufferLayer` → makes `RateLimit` cloneable (Axum's Hyper clones the service per TCP connection)
+- `HandleErrorLayer` → converts `BoxError` to HTTP response (`LoadShed` produces `BoxError`, Axum expects `Infallible`)
+
+```rust
+// Rate limiting applied to api router; CORS applied last = outermost
+.layer(
+    ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(|err: BoxError| async move {
+            (StatusCode::SERVICE_UNAVAILABLE, format!("Service overloaded: {}", err))
+        }))
+        .layer(LoadShedLayer::new())
+        .layer(BufferLayer::new(100))
+        .layer(RateLimitLayer::new(50, Duration::from_secs(10))),
+)
+.layer(cors);  // outermost — OPTIONS preflights never reach rate limiter
+```
 
 **Planned architecture** (not yet implemented):
 - Section 6: gRPC notifications (`rustflow-notifications` crate)

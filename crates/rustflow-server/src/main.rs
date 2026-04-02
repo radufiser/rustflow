@@ -4,11 +4,13 @@ mod routes;
 mod state;
 
 use crate::state::AppState;
-use axum::http::{HeaderName, HeaderValue, Method};
+use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
 use axum::Router;
+use axum::error_handling::HandleErrorLayer;
 use rustflow_common::{APP_NAME, APP_VERSION};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tower::{BoxError, ServiceBuilder, buffer::BufferLayer, limit::RateLimitLayer, load_shed::LoadShedLayer};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -45,6 +47,26 @@ async fn main() {
         .nest("/users", routes::users::router(state.clone()))
         // Enrichment — combines local data with external API calls
         .nest("/enrichment", routes::enrichment::router())
+        // ── Layer stack ─────────────────────────────────────
+        //
+        // Chained .layer() calls: LAST applied = OUTERMOST (runs first).
+        //   Request → CORS → HandleError → LoadShed → Buffer → RateLimit → Router
+        //
+        // 1. Rate limiting stack (applied first → innermost)
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|err: BoxError| async move {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!("Service overloaded: {}", err),
+                    )
+                }))
+                .layer(LoadShedLayer::new())
+                .layer(BufferLayer::new(100))
+                .layer(RateLimitLayer::new(50, Duration::from_secs(10))),
+        )
+        // 2. CORS (applied last → outermost, runs first)
+        //    OPTIONS preflights are handled here before reaching rate limiting
         .layer(cors);
 
     // Build the application router
