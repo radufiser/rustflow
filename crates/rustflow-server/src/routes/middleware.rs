@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use crate::errors::RustFlowError;
 use crate::state::AppState;
 use axum::extract::{OriginalUri, Request, State};
@@ -114,4 +115,13 @@ pub fn rate_limited<S: Clone + Send + Sync + 'static>(
             .layer(LoadShedLayer::new())
             .layer(RateLimitLayer::new(num, per)),
     )
+}
+
+pub async fn request_counter(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let prev = state.request_counter.fetch_add(1, Ordering::SeqCst);
+    let new = prev + 1;
+    if new % 100 == 0 {
+        println!("Request counter: {}", new);
+    }
+    next.run(request).await
 }

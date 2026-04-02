@@ -3,7 +3,7 @@ mod extractors;
 mod routes;
 mod state;
 
-use crate::routes::middleware::{log_elapsed_time, log_request, rate_limited};
+use crate::routes::middleware::{log_elapsed_time, log_request, rate_limited, request_counter};
 use crate::state::AppState;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
@@ -78,7 +78,8 @@ async fn main() {
             ServiceBuilder::new()
                 // outermost -> innermost
                 .layer(middleware::from_fn(log_request))
-                .layer(middleware::from_fn(log_elapsed_time)),
+                .layer(middleware::from_fn(log_elapsed_time))
+                .layer(middleware::from_fn_with_state(state.clone(), request_counter)),
         );
 
     // Build the application router
