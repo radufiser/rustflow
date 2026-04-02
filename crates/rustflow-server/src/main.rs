@@ -3,56 +3,16 @@ mod extractors;
 mod routes;
 mod state;
 
-use crate::routes::middleware::{log_elapsed_time, log_request};
+use crate::routes::middleware::{log_elapsed_time, log_request, rate_limited};
 use crate::state::AppState;
-use axum::error_handling::HandleErrorLayer;
-use axum::extract::Request;
-use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
-use axum::middleware::Next;
+use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
 use rustflow_common::{APP_NAME, APP_VERSION};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tower::{
-    buffer::BufferLayer, limit::RateLimitLayer, load_shed::LoadShedLayer, BoxError, ServiceBuilder,
-};
+use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
-
-/// Wraps a router with the full rate-limiting layer stack:
-/// HandleError → Buffer → LoadShed → RateLimit → router
-fn rate_limited<S: Clone + Send + Sync + 'static>(
-    router: Router<S>,
-    num: u64,
-    per: Duration,
-) -> Router<S> {
-    let retry_after = per.as_secs().to_string();
-    router.layer(
-        ServiceBuilder::new()
-            .layer(middleware::from_fn(move |request: Request, next: Next| {
-                let retry_after = retry_after.clone();
-                async move {
-                    let mut response = next.run(request).await;
-                    if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                        *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-                        if let Ok(val) = HeaderValue::from_str(&retry_after) {
-                            response.headers_mut().insert("Retry-After", val);
-                        }
-                    }
-                    response
-                }
-            }))
-            .layer(HandleErrorLayer::new(|err: BoxError| async move {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("Service overloaded: {}", err),
-                )
-            }))
-            .layer(BufferLayer::new(100))
-            .layer(LoadShedLayer::new())
-            .layer(RateLimitLayer::new(num, per)),
-    )
-}
 
 #[tokio::main]
 async fn main() {
@@ -102,42 +62,23 @@ async fn main() {
         );
     // ------------ Infrastructure --------------
     // Logging only - no rate limiting
-    let infra_router = routes::health::router().layer(middleware::from_fn(log_request));
+    let infra_router = routes::health::router()
+        .layer(middleware::from_fn(log_request))
+        .layer(middleware::from_fn(log_elapsed_time));
 
     let api_router = Router::new()
-        .nest(
-            "/tasks",
-            rate_limited(
-                routes::tasks::router(state.clone()),
-                50,
-                Duration::from_secs(10),
-            ),
-        )
-        .nest(
-            "/projects",
-            rate_limited(
-                routes::projects::router(state.clone()),
-                30,
-                Duration::from_secs(10),
-            ),
-        )
-        .nest(
-            "/users",
-            rate_limited(
-                routes::users::router(state.clone()),
-                20,
-                Duration::from_secs(10),
-            ),
-        )
+        .nest("/tasks", routes::tasks::router(state.clone()))
+        .nest("/projects", routes::projects::router(state.clone()))
+        .nest("/users", routes::users::router(state.clone()))
         .nest(
             "/enrichment",
             rate_limited(routes::enrichment::router(), 10, Duration::from_secs(10)),
         )
         .layer(
             ServiceBuilder::new()
-                 // outermost -> innermost
+                // outermost -> innermost
                 .layer(middleware::from_fn(log_request))
-                .layer(middleware::from_fn(log_elapsed_time))
+                .layer(middleware::from_fn(log_elapsed_time)),
         );
 
     // Build the application router

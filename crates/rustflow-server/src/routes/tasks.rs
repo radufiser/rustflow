@@ -1,12 +1,13 @@
 use crate::errors::RustFlowError;
 use crate::extractors::{ValidatedJson, ValidatedQuery};
-use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
+use crate::routes::middleware::{rate_limited, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post, put};
 use axum::{middleware, Extension, Json, Router};
 use rustflow_common::{AuthenticatedClient, CreateTask, Task, TaskFilter, TaskStatus};
+use std::time::Duration;
 
 // ── Read handlers (public) ──────────────────────────────────
 
@@ -28,7 +29,12 @@ async fn list(
         .tasks
         .iter()
         .filter(|task| filter.status.as_ref().map_or(true, |s| &task.status == s))
-        .filter(|task| filter.priority.as_ref().map_or(true, |p| &task.priority == p))
+        .filter(|task| {
+            filter
+                .priority
+                .as_ref()
+                .map_or(true, |p| &task.priority == p)
+        })
         .filter(|task| {
             filter.search.as_ref().map_or(true, |s| {
                 task.title.contains(s) || task.description.as_ref().map_or(false, |d| d.contains(s))
@@ -88,7 +94,10 @@ async fn create(
 
     store.next_id += 1;
     store.tasks.push(task.clone());
-    println!("[audit] Task {} created by client '{}'", task.id, client.name);
+    println!(
+        "[audit] Task {} created by client '{}'",
+        task.id, client.name
+    );
 
     Ok((StatusCode::CREATED, Json(task)))
 }
@@ -145,7 +154,10 @@ async fn change_status(
 
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
         task.status = payload;
-        println!("[audit] Task {id} status changed by client '{}'", client.name);
+        println!(
+            "[audit] Task {id} status changed by client '{}'",
+            client.name
+        );
         Ok(Json(task.clone()))
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -159,16 +171,24 @@ async fn change_status(
 
 pub fn router(state: AppState) -> Router<AppState> {
     // Public routes — no authentication required
-    let public = Router::new()
-        .route("/", get(list))
-        .route("/{id}", get(get_one));
+    let public = rate_limited(
+        Router::new()
+            .route("/", get(list))
+            .route("/{id}", get(get_one)),
+        100,
+        Duration::from_secs(10),
+    );
 
     // Protected routes — require valid API key, identity injected
-    let protected = Router::new()
-        .route("/", post(create))
-        .route("/{id}", put(update).delete(delete))
-        .route("/{id}/status", patch(change_status))
-        .layer(middleware::from_fn_with_state(state, require_api_key));
+    let protected = rate_limited(
+        Router::new()
+            .route("/", post(create))
+            .route("/{id}", put(update).delete(delete))
+            .route("/{id}/status", patch(change_status))
+            .layer(middleware::from_fn_with_state(state, require_api_key)),
+        10,
+        Duration::from_secs(10),
+    );
 
     // Merge and apply logging to all routes
     public.merge(protected)

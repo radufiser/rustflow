@@ -1,11 +1,12 @@
 use crate::errors::RustFlowError;
-use crate::routes::middleware::{log_elapsed_time, log_request, require_api_key};
+use crate::routes::middleware::{rate_limited, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{middleware, Extension, Json, Router};
 use rustflow_common::{AuthenticatedClient, CreateProject, Project};
+use std::time::Duration;
 
 /// GET /projects
 async fn list(State(state): State<AppState>) -> Json<Vec<Project>> {
@@ -65,19 +66,30 @@ async fn create(
     };
     store.next_id += 1;
     store.projects.push(project.clone());
-    println!("[audit] Project {} created by client '{}'", project.id, client.name);
+    println!(
+        "[audit] Project {} created by client '{}'",
+        project.id, client.name
+    );
     (StatusCode::CREATED, Json(project))
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
-    let public = Router::new()
-        .route("/", get(list))
-        .route("/{id}", get(get_one));
+    let public = rate_limited(
+        Router::new()
+            .route("/", get(list))
+            .route("/{id}", get(get_one)),
+        100,
+        Duration::from_secs(10),
+    );
 
-    let protected = Router::new()
-        .route("/", post(create))
-        .route("/{id}", axum::routing::delete(delete))
-        .layer(middleware::from_fn_with_state(state, require_api_key));
+    let protected = rate_limited(
+        Router::new()
+            .route("/", post(create))
+            .route("/{id}", axum::routing::delete(delete))
+            .layer(middleware::from_fn_with_state(state, require_api_key)),
+        10,
+        Duration::from_secs(10),
+    );
 
     public.merge(protected)
 }

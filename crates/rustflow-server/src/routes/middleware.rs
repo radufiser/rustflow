@@ -4,8 +4,14 @@ use axum::extract::{OriginalUri, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rustflow_common::AuthenticatedClient;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use axum::http::{HeaderValue, StatusCode};
+use axum::{middleware, Router};
+use axum::error_handling::HandleErrorLayer;
+use tower::{BoxError, ServiceBuilder};
+use tower::buffer::BufferLayer;
+use tower::limit::RateLimitLayer;
+use tower::load_shed::LoadShedLayer;
 
 /// Middleware that validates the `x-api-key` header and injects the
 /// authenticated client identity into request extensions.
@@ -73,4 +79,39 @@ pub async fn log_elapsed_time(request: Request, next: Next) -> Response {
     let response = next.run(request).await;
     println!("Took {} mu", Instant::now().duration_since(start).as_micros() as f64);
     response
+}
+
+/// Wraps a router with the full rate-limiting layer stack:
+/// HandleError → Buffer → LoadShed → RateLimit → router
+pub fn rate_limited<S: Clone + Send + Sync + 'static>(
+    router: Router<S>,
+    num: u64,
+    per: Duration,
+) -> Router<S> {
+    let retry_after = per.as_secs().to_string();
+    router.layer(
+        ServiceBuilder::new()
+            .layer(middleware::from_fn(move |request: Request, next: Next| {
+                let retry_after = retry_after.clone();
+                async move {
+                    let mut response = next.run(request).await;
+                    if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+                        *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                        if let Ok(val) = HeaderValue::from_str(&retry_after) {
+                            response.headers_mut().insert("Retry-After", val);
+                        }
+                    }
+                    response
+                }
+            }))
+            .layer(HandleErrorLayer::new(|err: BoxError| async move {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("Service overloaded: {}", err),
+                )
+            }))
+            .layer(BufferLayer::new(100))
+            .layer(LoadShedLayer::new())
+            .layer(RateLimitLayer::new(num, per)),
+    )
 }
