@@ -172,6 +172,4 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     // Merge and apply logging to all routes
     public.merge(protected)
-        .layer(middleware::from_fn(log_request))
-        .layer(middleware::from_fn(log_elapsed_time))
 }

@@ -3,16 +3,19 @@ mod extractors;
 mod routes;
 mod state;
 
+use crate::routes::middleware::{log_elapsed_time, log_request};
 use crate::state::AppState;
+use axum::error_handling::HandleErrorLayer;
+use axum::extract::Request;
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
-use axum::extract::{Request};
 use axum::middleware::Next;
 use axum::{middleware, Router};
-use axum::error_handling::HandleErrorLayer;
 use rustflow_common::{APP_NAME, APP_VERSION};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tower::{BoxError, ServiceBuilder, buffer::BufferLayer, limit::RateLimitLayer, load_shed::LoadShedLayer};
+use tower::{
+    buffer::BufferLayer, limit::RateLimitLayer, load_shed::LoadShedLayer, BoxError, ServiceBuilder,
+};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -59,9 +62,12 @@ async fn main() {
     let cors = CorsLayer::new()
         // Each parse returns Result — filter_map discards any that fail to parse
         .allow_origin(
-            state.config.cors_origins.iter()
+            state
+                .config
+                .cors_origins
+                .iter()
                 .filter_map(|o| o.parse::<HeaderValue>().ok())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         )
         .allow_methods([
             Method::GET,
@@ -74,21 +80,13 @@ async fn main() {
             HeaderName::from_static("content-type"),
             HeaderName::from_static("x-api-key"),
         ])
-//       .allow_credentials(true) panics
+        //       .allow_credentials(true) panics
         .expose_headers([HeaderName::from_static("x-authenticated-as")])
         .max_age(Duration::from_secs(3600));
 
-
-    let api = Router::new()
-        .nest("/tasks", rate_limited(routes::tasks::router(state.clone()), 50, Duration::from_secs(10)))
-        .nest("/projects", rate_limited(routes::projects::router(state.clone()), 30, Duration::from_secs(10)))
-        .nest("/users", rate_limited(routes::users::router(state.clone()), 20, Duration::from_secs(10)))
-        .nest("/enrichment", rate_limited(routes::enrichment::router(), 10, Duration::from_secs(10)))
-        .layer(cors);
-
-    // Build the application router
-    let app = Router::new()
-        // Serve the dashboard at root
+    // ------------- Static files ------------
+    // No middleware - served as fast as possible
+    let static_router = Router::new()
         .route_service(
             "/",
             ServeFile::new("crates/rustflow-server/static/index.html"),
@@ -101,13 +99,57 @@ async fn main() {
         .route_service(
             "/favicon.ico",
             ServeFile::new("crates/rustflow-server/static/favicon.ico"),
+        );
+    // ------------ Infrastructure --------------
+    // Logging only - no rate limiting
+    let infra_router = routes::health::router().layer(middleware::from_fn(log_request));
+
+    let api_router = Router::new()
+        .nest(
+            "/tasks",
+            rate_limited(
+                routes::tasks::router(state.clone()),
+                50,
+                Duration::from_secs(10),
+            ),
         )
-        // Health & config — merged at root level (no prefix)
-        .merge(routes::health::router())
+        .nest(
+            "/projects",
+            rate_limited(
+                routes::projects::router(state.clone()),
+                30,
+                Duration::from_secs(10),
+            ),
+        )
+        .nest(
+            "/users",
+            rate_limited(
+                routes::users::router(state.clone()),
+                20,
+                Duration::from_secs(10),
+            ),
+        )
+        .nest(
+            "/enrichment",
+            rate_limited(routes::enrichment::router(), 10, Duration::from_secs(10)),
+        )
+        .layer(
+            ServiceBuilder::new()
+                 // outermost -> innermost
+                .layer(middleware::from_fn(log_request))
+                .layer(middleware::from_fn(log_elapsed_time))
+        );
+
+    // Build the application router
+    let app = Router::new()
+        .merge(static_router)
+        .merge(infra_router)
         // Domain routes — nested under /api/*
-        .nest("/api", api)
+        .nest("/api", api_router)
         // Provide state to ALL routes (merged and nested)
-        .with_state(state);
+        .with_state(state)
+        // CORS is the only global layer — needed for all browser requests
+        .layer(cors);
 
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)

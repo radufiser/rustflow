@@ -76,6 +76,4 @@ pub fn router(state: AppState) -> Router<AppState> {
         .layer(middleware::from_fn_with_state(state, require_api_key));
 
     public.merge(protected)
-        .layer(middleware::from_fn(log_request))
-        .layer(middleware::from_fn(log_elapsed_time))
 }
