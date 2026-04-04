@@ -10,6 +10,7 @@ use axum::{middleware, Router};
 use rustflow_common::{APP_NAME, APP_VERSION};
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
@@ -115,6 +116,37 @@ async fn main() {
     println!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
 
     axum::serve(listener, app_router)
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("Server error");
+    // This runs AFTER all connections are drained
+    println!("{} has shut down gracefully", APP_NAME);
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            println!("\nReceived SIGINT (Ctrl+C), starting graceful shutdown...");
+        }
+        _ = terminate => {
+            println!("\nReceived SIGTERM, starting graceful shutdown...");
+        }
+    }
 }
