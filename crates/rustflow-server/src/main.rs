@@ -11,13 +11,12 @@ use rustflow_common::{APP_NAME, APP_VERSION};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
+use tower_http::compression::predicate::SizeAbove;
+use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-#[tokio::main]
-async fn main() {
-    let state: AppState = AppState::new();
-
+fn build_app(state: AppState) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
         // Each parse returns Result — filter_map discards any that fail to parse
@@ -77,9 +76,16 @@ async fn main() {
         .layer(
             ServiceBuilder::new()
                 // outermost -> innermost
+                .layer(
+                    CompressionLayer::new()
+                        .compress_when(DefaultPredicate::new().and(SizeAbove::new(512))),
+                )
                 .layer(middleware::from_fn(log_request))
                 .layer(middleware::from_fn(log_elapsed_time))
-                .layer(middleware::from_fn_with_state(state.clone(), request_counter)),
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    request_counter,
+                )),
         );
 
     // Build the application router
@@ -93,6 +99,14 @@ async fn main() {
         // CORS is the only global layer — needed for all browser requests
         .layer(cors);
 
+    app
+}
+
+#[tokio::main]
+async fn main() {
+    let state: AppState = AppState::new();
+
+    let app_router: Router = build_app(state);
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)
         .await
@@ -100,5 +114,7 @@ async fn main() {
 
     println!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
 
-    axum::serve(listener, app).await.expect("Server error");
+    axum::serve(listener, app_router)
+        .await
+        .expect("Server error");
 }
