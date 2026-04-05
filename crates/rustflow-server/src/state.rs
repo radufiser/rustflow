@@ -2,7 +2,7 @@ use rustflow_common::{AppConfig, Priority, Project, Task, TaskStatus, User};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use tokio::sync::RwLock;
 
 // ── Task State ──────────────────────────────────────────────
@@ -117,6 +117,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub api_keys: HashMap<String, (String, String)>,
     pub request_counter: Arc<AtomicU64>,
+    pub shutdown_requested: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -140,6 +141,7 @@ impl AppState {
             http_client: reqwest::Client::new(),
             api_keys,
             request_counter: Arc::new(AtomicU64::new(0)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 }

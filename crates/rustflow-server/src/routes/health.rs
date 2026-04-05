@@ -1,6 +1,8 @@
+use crate::state::AppState;
+use axum::http::StatusCode;
 use axum::{extract::State, routing::get, Extension, Json, Router};
 use rustflow_common::{AppConfig, AuthenticatedClient};
-use crate::state::AppState;
+use std::sync::atomic::Ordering;
 
 /// Health check endpoint - returns structured JSON about the service.
 ///
@@ -36,13 +38,23 @@ async fn config(State(state): State<AppState>) -> Json<AppConfig> {
     Json(state.config.clone())
 }
 
+async fn ready(State(state): State<AppState>) -> StatusCode {
+    if state.shutdown_requested.load(Ordering::Relaxed) {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    }
+}
+
 /// Build the health/meta router.
 ///
 /// Uses `.merge()` in main (no prefix) so these become:
 ///   GET /health
 ///   GET /config
+///   GET /ready
 pub fn router() -> Router<AppState> {
     Router::new()
-    .route("/health", get(health))
-    .route("/config", get(config))
+        .route("/health", get(health))
+        .route("/config", get(config))
+        .route("/ready", get(ready))
 }

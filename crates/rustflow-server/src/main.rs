@@ -8,18 +8,21 @@ use crate::state::AppState;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
 use rustflow_common::{APP_NAME, APP_VERSION};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::Notify;
 use tower::ServiceBuilder;
 use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-fn build_app(state: AppState) -> Router {
+fn build_app(state: &AppState) -> Router {
     // CORS configuration
-    let cors = CorsLayer::new()
+    let cors: CorsLayer = CorsLayer::new()
         // Each parse returns Result — filter_map discards any that fail to parse
         .allow_origin(
             state
@@ -46,7 +49,7 @@ fn build_app(state: AppState) -> Router {
 
     // ------------- Static files ------------
     // No middleware - served as fast as possible
-    let static_router = Router::new()
+    let static_router: Router<AppState> = Router::new()
         .route_service(
             "/",
             ServeFile::new("crates/rustflow-server/static/index.html"),
@@ -62,11 +65,11 @@ fn build_app(state: AppState) -> Router {
         );
     // ------------ Infrastructure --------------
     // Logging only - no rate limiting
-    let infra_router = routes::health::router()
+    let infra_router: Router<AppState> = routes::health::router()
         .layer(middleware::from_fn(log_request))
         .layer(middleware::from_fn(log_elapsed_time));
 
-    let api_router = Router::new()
+    let api_router: Router<AppState> = Router::new()
         .nest("/tasks", routes::tasks::router(state.clone()))
         .nest("/projects", routes::projects::router(state.clone()))
         .nest("/users", routes::users::router(state.clone()))
@@ -90,13 +93,13 @@ fn build_app(state: AppState) -> Router {
         );
 
     // Build the application router
-    let app = Router::new()
+    let app: Router = Router::new()
         .merge(static_router)
         .merge(infra_router)
         // Domain routes — nested under /api/*
         .nest("/api", api_router)
         // Provide state to ALL routes (merged and nested)
-        .with_state(state)
+        .with_state(state.clone())
         // CORS is the only global layer — needed for all browser requests
         .layer(cors);
 
@@ -107,7 +110,7 @@ fn build_app(state: AppState) -> Router {
 async fn main() {
     let state: AppState = AppState::new();
 
-    let app_router: Router = build_app(state);
+    let app_router: Router = build_app(&state);
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)
         .await
@@ -115,14 +118,50 @@ async fn main() {
 
     println!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
 
-    axum::serve(listener, app_router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("Server error");
-    // This runs AFTER all connections are drained
-    println!("{} has shut down gracefully", APP_NAME);
+    // Shared doorbell: one handle goes into the server, one stays in main
+    let shutdown_notify: Arc<Notify> = Arc::new(Notify::new());
+    let server_shutdown: Arc<Notify> = shutdown_notify.clone(); // Arc clone — cheap pointer copy
+
+    // Server will keep accepting connections until `server_shutdown` is notified
+    let server = axum::serve(listener, app_router)
+        .with_graceful_shutdown(async move {
+            server_shutdown.notified().await; // parks here until the doorbell rings
+        })
+        .into_future(); // convert to a standard Future so select!/timeout can use it
+
+    // Pin to the stack — required to poll the same future multiple times in select!
+    tokio::pin!(server);
+
+    // Race: normal server lifetime vs incoming shutdown signal
+    tokio::select! {
+        // Server stopped on its own (error or all listeners closed)
+        result = &mut server => {
+            result.expect("Server error");
+            println!("{} stopped", APP_NAME);
+        }
+        // Ctrl+C or SIGTERM received
+        _ = shutdown_signal() => {
+            println!("Draining... (10s timeout)");
+            state.shutdown_requested.store(true, Ordering::Relaxed);
+            // Ring the doorbell → Axum stops accepting, starts draining in-flight requests
+            shutdown_notify.notify_waiters();
+
+            // Wait up to 10s for in-flight requests to finish
+            match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
+                Ok(result) => {
+                    result.expect("Server error");
+                    println!("{} has shut down gracefully", APP_NAME);
+                }
+                Err(_) => {
+                    // Requests still running after 10s — give up
+                    println!("Shutdown timeout exceeded, forcing exit");
+                }
+            }
+        }
+    }
 }
 
+/// Wait for either SIGINT (Ctrl+C) or SIGTERM (docker stop / kill -15)
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
@@ -130,6 +169,7 @@ async fn shutdown_signal() {
             .expect("failed to install Ctrl+C handler");
     };
 
+    // SIGTERM only exists on Unix; on other platforms use a future that never resolves
     #[cfg(unix)]
     let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
@@ -139,8 +179,9 @@ async fn shutdown_signal() {
     };
 
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let terminate = std::future::pending::<()>(); // never completes — ctrl_c is the only option
 
+    // Whichever signal arrives first wins
     tokio::select! {
         _ = ctrl_c => {
             println!("\nReceived SIGINT (Ctrl+C), starting graceful shutdown...");
