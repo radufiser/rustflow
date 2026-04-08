@@ -70,7 +70,7 @@ pub async fn log_request(request: Request, next: Next) -> Response {
         .get::<OriginalUri>()
         .map(|original| original.0.to_string())
         .unwrap_or_else(|| request.uri().to_string());
-    println!("{} {}", request.method(), uri);
+    tracing::info!("{} {}", request.method(), uri);
     next.run(request).await
 }
 
@@ -78,7 +78,7 @@ pub async fn log_request(request: Request, next: Next) -> Response {
 pub async fn log_elapsed_time(request: Request, next: Next) -> Response {
     let start = Instant::now();
     let response = next.run(request).await;
-    println!("Took {} mu", Instant::now().duration_since(start).as_micros() as f64);
+    tracing::debug!("Took {}μs", start.elapsed().as_micros());
     response
 }
 
@@ -121,7 +121,7 @@ pub async fn request_counter(State(state): State<AppState>, request: Request, ne
     let prev = state.request_counter.fetch_add(1, Ordering::SeqCst);
     let new = prev + 1;
     if new % 100 == 0 {
-        println!("Request counter: {}", new);
+        tracing::debug!("Request counter: {}", new);
     }
     next.run(request).await
 }

@@ -108,6 +108,9 @@ fn build_app(state: &AppState) -> Router {
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing first - before any other code runs
+    // All tracing macros (info!, debug!, warn!) are no-ops until this is called.
+    rustflow_common::tracing::init_tracing();
     let state: AppState = AppState::new();
 
     let app_router: Router = build_app(&state);
@@ -116,7 +119,7 @@ async fn main() {
         .await
         .expect("Failed to bind to address");
 
-    println!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
+    tracing::info!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
 
     // Shared doorbell: one handle goes into the server, one stays in main
     let shutdown_notify: Arc<Notify> = Arc::new(Notify::new());
@@ -137,11 +140,11 @@ async fn main() {
         // Server stopped on its own (error or all listeners closed)
         result = &mut server => {
             result.expect("Server error");
-            println!("{} stopped", APP_NAME);
+            tracing::info!("{} stopped", APP_NAME);
         }
         // Ctrl+C or SIGTERM received
         _ = shutdown_signal() => {
-            println!("Draining... (10s timeout)");
+            tracing::info!("Draining... (10s timeout)");
             state.shutdown_requested.store(true, Ordering::Relaxed);
             // Ring the doorbell → Axum stops accepting, starts draining in-flight requests
             shutdown_notify.notify_waiters();
@@ -150,11 +153,11 @@ async fn main() {
             match tokio::time::timeout(Duration::from_secs(10), &mut server).await {
                 Ok(result) => {
                     result.expect("Server error");
-                    println!("{} has shut down gracefully", APP_NAME);
+                    tracing::info!("{} has shut down gracefully", APP_NAME);
                 }
                 Err(_) => {
                     // Requests still running after 10s — give up
-                    println!("Shutdown timeout exceeded, forcing exit");
+                    tracing::warn!("Shutdown timeout exceeded, forcing exit");
                 }
             }
         }
@@ -184,10 +187,10 @@ async fn shutdown_signal() {
     // Whichever signal arrives first wins
     tokio::select! {
         _ = ctrl_c => {
-            println!("\nReceived SIGINT (Ctrl+C), starting graceful shutdown...");
+            tracing::info!("Received SIGINT (Ctrl+C), starting graceful shutdown...");
         }
         _ = terminate => {
-            println!("\nReceived SIGTERM, starting graceful shutdown...");
+            tracing::info!("Received SIGTERM, starting graceful shutdown...");
         }
     }
 }

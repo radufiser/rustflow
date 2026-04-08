@@ -21,7 +21,7 @@ async fn list(
     ValidatedQuery(filter): ValidatedQuery<TaskFilter>,
 ) -> Json<Vec<Task>> {
     if let Some(Extension(client)) = auth {
-        println!("Listing tasks for authenticated client {}", client.name);
+        tracing::debug!("Listing tasks for authenticated client {}", client.name);
     }
     let state = state.tasks.0.read().await;
 
@@ -94,7 +94,7 @@ async fn create(
 
     store.next_id += 1;
     store.tasks.push(task.clone());
-    println!(
+    tracing::info!(
         "[audit] Task {} created by client '{}'",
         task.id, client.name
     );
@@ -113,7 +113,7 @@ async fn delete(
     store.tasks.retain(|task| task.id != id);
 
     if store.tasks.len() < len_before {
-        println!("[audit] Task {id} deleted by client '{}'", client.name);
+        tracing::info!("[audit] Task {id} deleted by client '{}'", client.name);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -134,7 +134,7 @@ async fn update(
         task.title = payload.title;
         task.description = payload.description;
         task.priority = payload.priority;
-        println!("[audit] Task {id} updated by client '{}'", client.name);
+        tracing::info!("[audit] Task {id} updated by client '{}'", client.name);
         Ok(Json(task.clone()))
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -154,7 +154,7 @@ async fn change_status(
 
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
         task.status = payload;
-        println!(
+        tracing::info!(
             "[audit] Task {id} status changed by client '{}'",
             client.name
         );

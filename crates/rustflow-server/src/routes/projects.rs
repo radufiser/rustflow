@@ -42,7 +42,7 @@ async fn delete(
     let len_before = store.projects.len();
     store.projects.retain(|project| project.id != id);
     if store.projects.len() < len_before {
-        println!("[audit] Project {} deleted by client '{}'", id, client.name);
+        tracing::info!("[audit] Project {} deleted by client '{}'", id, client.name);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -66,7 +66,7 @@ async fn create(
     };
     store.next_id += 1;
     store.projects.push(project.clone());
-    println!(
+    tracing::info!(
         "[audit] Project {} created by client '{}'",
         project.id, client.name
     );

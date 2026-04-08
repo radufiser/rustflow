@@ -22,3 +22,5 @@ thiserror = "2.0.18"
 tower = {version = "0.5", features = ["limit", "load-shed", "buffer"]}
 tower-http = { version = "0.6", features = ["fs", "cors", "compression-full"]}
 uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["fmt", "env-filter"]}
