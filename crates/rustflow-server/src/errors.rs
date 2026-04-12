@@ -71,6 +71,8 @@ impl IntoResponse for RustFlowError {
             "details": details
         });
 
+        tracing::error!("{}", body);
+
         (status, Json(body)).into_response()
     }
 }

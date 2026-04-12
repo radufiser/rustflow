@@ -1,18 +1,18 @@
-use std::sync::atomic::Ordering;
 use crate::errors::RustFlowError;
 use crate::state::AppState;
-use axum::extract::{OriginalUri, Request, State};
+use axum::error_handling::HandleErrorLayer;
+use axum::extract::{Request, State};
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use rustflow_common::AuthenticatedClient;
-use std::time::{Duration, Instant};
-use axum::http::{HeaderValue, StatusCode};
 use axum::{middleware, Router};
-use axum::error_handling::HandleErrorLayer;
-use tower::{BoxError, ServiceBuilder};
+use rustflow_common::AuthenticatedClient;
+use std::sync::atomic::Ordering;
+use std::time::{Duration};
 use tower::buffer::BufferLayer;
 use tower::limit::RateLimitLayer;
 use tower::load_shed::LoadShedLayer;
+use tower::{BoxError, ServiceBuilder};
 
 /// Middleware that validates the `x-api-key` header and injects the
 /// authenticated client identity into request extensions.
@@ -60,26 +60,6 @@ pub async fn require_api_key(
             }
         }
     }
-}
-
-
-pub async fn log_request(request: Request, next: Next) -> Response {
-    // Use OriginalUri from extensions to get the full path before nest() strips the prefix
-    let uri = request
-        .extensions()
-        .get::<OriginalUri>()
-        .map(|original| original.0.to_string())
-        .unwrap_or_else(|| request.uri().to_string());
-    tracing::info!("{} {}", request.method(), uri);
-    next.run(request).await
-}
-
-
-pub async fn log_elapsed_time(request: Request, next: Next) -> Response {
-    let start = Instant::now();
-    let response = next.run(request).await;
-    tracing::debug!("Took {}μs", start.elapsed().as_micros());
-    response
 }
 
 /// Wraps a router with the full rate-limiting layer stack:

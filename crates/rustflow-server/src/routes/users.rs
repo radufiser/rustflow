@@ -8,11 +8,13 @@ use axum::{middleware, Json, Router};
 use rustflow_common::{CreateUser, User};
 use std::time::Duration;
 
+#[tracing::instrument(name = "user.list", skip_all)]
 async fn list(State(state): State<AppState>) -> Json<Vec<User>> {
     let store = state.users.0.read().await;
     Json(store.users.clone())
 }
 
+#[tracing::instrument(name = "user.create", skip_all, fields(user.id))]
 async fn create(
     State(state): State<AppState>,
     Json(payload): Json<CreateUser>,
@@ -31,6 +33,7 @@ async fn create(
     (StatusCode::CREATED, Json(user))
 }
 
+#[tracing::instrument(name = "user.delete", skip_all, fields(user.id = %id))]
 async fn delete(
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -49,6 +52,7 @@ async fn delete(
     }
 }
 
+#[tracing::instrument(name = "user.get", skip_all, fields(user.id = %id))]
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<u64>,

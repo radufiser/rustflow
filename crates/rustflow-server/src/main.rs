@@ -3,7 +3,7 @@ mod extractors;
 mod routes;
 mod state;
 
-use crate::routes::middleware::{log_elapsed_time, log_request, rate_limited, request_counter};
+use crate::routes::middleware::{rate_limited, request_counter};
 use crate::state::AppState;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{middleware, Router};
@@ -19,6 +19,8 @@ use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 fn build_app(state: &AppState) -> Router {
     // CORS configuration
@@ -65,9 +67,7 @@ fn build_app(state: &AppState) -> Router {
         );
     // ------------ Infrastructure --------------
     // Logging only - no rate limiting
-    let infra_router: Router<AppState> = routes::health::router()
-        .layer(middleware::from_fn(log_request))
-        .layer(middleware::from_fn(log_elapsed_time));
+    let infra_router: Router<AppState> = routes::health::router();
 
     let api_router: Router<AppState> = Router::new()
         .nest("/tasks", routes::tasks::router(state.clone()))
@@ -84,8 +84,6 @@ fn build_app(state: &AppState) -> Router {
                     CompressionLayer::new()
                         .compress_when(DefaultPredicate::new().and(SizeAbove::new(512))),
                 )
-                .layer(middleware::from_fn(log_request))
-                .layer(middleware::from_fn(log_elapsed_time))
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     request_counter,
@@ -100,6 +98,14 @@ fn build_app(state: &AppState) -> Router {
         .nest("/api", api_router)
         // Provide state to ALL routes (merged and nested)
         .with_state(state.clone())
+        .layer(
+            TraceLayer::new_for_http()
+                .on_response(
+                    DefaultOnResponse::new()
+                        .level(Level::DEBUG)
+                        .latency_unit(tower_http::LatencyUnit::Micros),
+                ),
+        )
         // CORS is the only global layer — needed for all browser requests
         .layer(cors);
 

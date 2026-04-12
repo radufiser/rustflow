@@ -6,6 +6,7 @@ use axum::{
     Router,
 };
 use crate::errors::RustFlowError;
+use tracing::Instrument;
 // -------------- Types ------------
 
 /// A user fetched from the external JSONPlaceholder API
@@ -38,6 +39,7 @@ struct EnrichedTask {
 /// 2. Making an outbound HTTP call (reqwest)
 /// 3. Combining data from multiple sources
 /// 4. Handling errors from external services
+#[tracing::instrument(name = "enrichment.enrich", skip(state))]
 async fn enrich_task(
     State(state): State<AppState>,
     Path((task_id, user_id)): Path<(u64, u64)>,
@@ -61,20 +63,24 @@ async fn enrich_task(
     // Step 2: Fetch user from external service
     let url = format!("https://jsonplaceholder.typicode.com/users/{}", user_id);
 
-    let user: ExternalUser = state
-        .http_client
-        .get(&url)
-        // Network or request error (e.g., DNS, connection, timeout)
-        .send()
-        .await
-        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?
-        // HTTP status error (e.g., 404, 500)
-        .error_for_status()
-        .map_err(|e|  RustFlowError::ExternalService(e.to_string()))?
-        // JSON deserialization error (e.g., invalid/mismatched JSON)
-        .json()
-        .await
-        .map_err(|e| RustFlowError::ExternalService(e.to_string()))?;
+    let user: ExternalUser = async {
+        state
+            .http_client
+            .get(&url)
+            // Network or request error (e.g., DNS, connection, timeout)
+            .send()
+            .await
+            .map_err(|e| RustFlowError::ExternalService(e.to_string()))?
+            // HTTP status error (e.g., 404, 500)
+            .error_for_status()
+            .map_err(|e| RustFlowError::ExternalService(e.to_string()))?
+            // JSON deserialization error (e.g., invalid/mismatched JSON)
+            .json()
+            .await
+            .map_err(|e| RustFlowError::ExternalService(e.to_string()))
+    }
+    .instrument(tracing::info_span!("http.get", url = %url))
+    .await?;
 
     // Step 3: Combine into a rich response
 
@@ -93,6 +99,7 @@ async fn enrich_task(
 ///
 /// A simpler example: just proxy an external API call and return the result.
 /// Useful for testing that the HTTP client works.
+#[tracing::instrument(name = "external_users.list", skip(state))]
 async fn list_external_users(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ExternalUser>>, RustFlowError> {

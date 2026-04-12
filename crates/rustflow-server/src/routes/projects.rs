@@ -9,12 +9,14 @@ use rustflow_common::{AuthenticatedClient, CreateProject, Project};
 use std::time::Duration;
 
 /// GET /projects
+#[tracing::instrument(name = "project.list", skip_all)]
 async fn list(State(state): State<AppState>) -> Json<Vec<Project>> {
     let store = state.projects.0.read().await;
     Json(store.projects.clone())
 }
 
 /// GET /projects/:id
+#[tracing::instrument(name = "project.get", skip_all, fields(project.id = %id))]
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -33,6 +35,7 @@ async fn get_one(
 }
 
 /// DELETE /projects/:id
+#[tracing::instrument(name = "project.delete", skip_all, fields(project.id = %id))]
 async fn delete(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -52,6 +55,7 @@ async fn delete(
 }
 
 /// POST /projects
+#[tracing::instrument(name = "project.create", skip_all, fields(project.id))]
 async fn create(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -70,6 +74,7 @@ async fn create(
         "[audit] Project {} created by client '{}'",
         project.id, client.name
     );
+    tracing::span::Span::current().record("project.id", id);
     (StatusCode::CREATED, Json(project))
 }
 

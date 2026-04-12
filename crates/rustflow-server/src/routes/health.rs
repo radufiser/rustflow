@@ -46,15 +46,32 @@ async fn ready(State(state): State<AppState>) -> StatusCode {
     }
 }
 
+// ── Benchmark endpoints (Exercise 3.4.6) ────────────────────
+
+/// Bare-minimum handler — no instrumentation overhead.
+async fn bench_noop() -> StatusCode {
+    StatusCode::OK
+}
+
+/// Same handler but wrapped in an `#[instrument]` span.
+#[tracing::instrument(name = "bench.instrumented", skip_all)]
+async fn bench_instrumented() -> StatusCode {
+    StatusCode::OK
+}
+
 /// Build the health/meta router.
 ///
 /// Uses `.merge()` in main (no prefix) so these become:
 ///   GET /health
 ///   GET /config
 ///   GET /ready
+///   GET /bench/noop
+///   GET /bench/instrumented
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/config", get(config))
         .route("/ready", get(ready))
+        .route("/bench/noop", get(bench_noop))
+        .route("/bench/instrumented", get(bench_instrumented))
 }

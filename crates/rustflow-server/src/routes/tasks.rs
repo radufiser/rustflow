@@ -15,6 +15,14 @@ use std::time::Duration;
 ///
 /// Uses `Option<Extension<AuthenticatedClient>>` so it works with or without
 /// the auth middleware. When a key is provided, the client name is logged.
+#[tracing::instrument(
+    name = "task.list",
+    skip_all,
+    fields(
+        filter.status = filter.status.as_ref().map(|s| s.to_string()).as_deref(),
+        filter.priority = filter.priority.as_ref().map(|p| p.to_string()).as_deref(),
+    )
+)]
 async fn list(
     auth: Option<Extension<AuthenticatedClient>>,
     State(state): State<AppState>,
@@ -42,7 +50,7 @@ async fn list(
         })
         .cloned()
         .collect();
-
+    tracing::debug!(count = filtered.len(), "tasks listed");
     Json(filtered)
 }
 
@@ -51,6 +59,7 @@ async fn list(
 /// The Path extractor captures the `id` from the URL and looks up the corresponding task.
 /// If the task is found, it returns it as JSON. If not, it returns a 404 Not Found status.
 /// Axum automatically returns 400 Bad Request if the `id` cannot be parsed as a u64.
+#[tracing::instrument(name="task.get", fields(task.id = %id), skip(state))]
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -69,6 +78,7 @@ async fn get_one(
         )))
 }
 
+#[tracing::instrument(name="task.create", skip_all, fields(task.id))]
 async fn create(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -95,13 +105,17 @@ async fn create(
     store.next_id += 1;
     store.tasks.push(task.clone());
     tracing::info!(
-        "[audit] Task {} created by client '{}'",
-        task.id, client.name
+        task_id = %task.id,
+        client = %client.name,
+        "task created"
     );
+    // Record the ID now that we know it
+    tracing::Span::current().record("task.id", task.id);
 
     Ok((StatusCode::CREATED, Json(task)))
 }
 
+#[tracing::instrument(name="task.delete", fields(task.id = %id), skip_all)]
 async fn delete(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -113,7 +127,11 @@ async fn delete(
     store.tasks.retain(|task| task.id != id);
 
     if store.tasks.len() < len_before {
-        tracing::info!("[audit] Task {id} deleted by client '{}'", client.name);
+        tracing::info!(
+            task_id = %id,
+            client = %client.name,
+            "task deleted"
+        );
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -122,6 +140,7 @@ async fn delete(
     }
 }
 
+#[tracing::instrument(name="task.update", fields(task.id = %id), skip_all)]
 async fn update(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -134,7 +153,11 @@ async fn update(
         task.title = payload.title;
         task.description = payload.description;
         task.priority = payload.priority;
-        tracing::info!("[audit] Task {id} updated by client '{}'", client.name);
+        tracing::info!(
+            task_id = %id,
+            client = %client.name,
+            "task updated"
+        );
         Ok(Json(task.clone()))
     } else {
         Err(RustFlowError::NotFound(format!(
@@ -144,6 +167,7 @@ async fn update(
     }
 }
 
+#[tracing::instrument(name="task.change_status", fields(task.id = %id), skip_all)]
 async fn change_status(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -155,8 +179,10 @@ async fn change_status(
     if let Some(task) = store.tasks.iter_mut().find(|task| task.id == id) {
         task.status = payload;
         tracing::info!(
-            "[audit] Task {id} status changed by client '{}'",
-            client.name
+            action = "task_status_changed",
+            task_id = %id,
+            client = %client.name,
+            "task status changed"
         );
         Ok(Json(task.clone()))
     } else {
