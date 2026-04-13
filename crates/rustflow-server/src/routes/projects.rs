@@ -1,5 +1,5 @@
 use crate::errors::RustFlowError;
-use crate::routes::middleware::{rate_limited, require_api_key};
+use crate::routes::middleware::{rate_limited, record_client_span, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -91,6 +91,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         Router::new()
             .route("/", post(create))
             .route("/{id}", axum::routing::delete(delete))
+            .layer(middleware::from_fn(record_client_span))
             .layer(middleware::from_fn_with_state(state, require_api_key)),
         10,
         Duration::from_secs(10),

@@ -21,7 +21,7 @@ Cargo workspace with two crates (more planned per `Course.md`):
 
 1. **Router layout**: Domain routes nested under `/api/*`, infrastructure merged at root
    - `GET /health` (merged) vs `GET /api/tasks/1` (nested)
-2. **Composite state**: `AppState` holds `TaskState`, `ProjectState`, `UserState` (each `Arc<RwLock<Store>>`), plus shared `http_client` and `config`
+2. **Composite state**: `AppState` holds `TaskState`, `ProjectState`, `UserState` (each `Arc<RwLock<Store>>`), plus shared `http_client`, `config`, `api_keys`, `request_counter: Arc<AtomicU64>`, and `shutdown_requested: Arc<AtomicBool>`
 3. **Unified errors**: `RustFlowError` enum → `IntoResponse` → structured JSON with `request_id`
 4. **Custom extractors**: `ValidatedJson<T>` / `ValidatedQuery<T>` combine deserialization + validation → 422 on failure
 5. **Public/protected split** (since 2.17): each domain router splits reads (open) from writes (auth required via `require_api_key` middleware)
@@ -86,39 +86,50 @@ axum = { workspace = true }
 ### Edition 2024
 All crates use `edition = "2024"`.
 
+### Tracing Instrumentation Pattern
+Handlers use `#[tracing::instrument]` with domain-scoped span names and selective field recording:
+```rust
+#[tracing::instrument(name = "task.create", skip_all, fields(task.id))]
+async fn create(...) -> Result<...> {
+    // ... do work ...
+    tracing::Span::current().record("task.id", task.id); // late-record once known
+    tracing::info!(task_id = %task.id, client = %client.name, "task created");
+}
+```
+- `name = "domain.action"` — e.g. `task.list`, `enrichment.enrich`
+- `skip_all` — avoid logging large state; select fields explicitly
+- Sub-spans for I/O: `.instrument(tracing::info_span!("http.get", url = %url))` (see `enrichment.rs`)
+
 ## Course-Driven Development
 
-Current state: **Section 2.20** (router layers reorganized — rate limiting, CORS, logging applied at correct scopes).
+Current state: **Section 3.5** (tracing with named Axum spans and `#[instrument]` on handlers).
 
 **Next section** (doc exists in `/docs/sections/`, ready to implement):
-- 2.21 — Graceful Shutdown
+- 3.6 — Logging to File
 
 **Patterns established so far:**
 - Auth middleware with identity injection (`middleware.rs` → `AuthenticatedClient` in extensions)
 - Public/protected router splitting (reads open, writes require API key)
 - API keys loaded from `config/api_keys.json` at startup
 - CORS configured from `AppConfig.cors_origins` (dynamic origin list)
-- Rate limiting via `ServiceBuilder` stack: `HandleErrorLayer` → `LoadShedLayer` → `BufferLayer` → `RateLimitLayer`
-- Router groups by middleware scope: static (none), health (merged at root), API (CORS + rate limiting)
+- Per-router rate limiting via `rate_limited()` helper (see below)
+- Router groups by middleware scope: static (none), health (merged at root), API (CORS + compression + request counter)
 - Chained `.layer()` ordering: **last applied = outermost** (runs first on request)
+- Graceful shutdown: `Notify` + `tokio::select!` + 10s drain timeout (`main.rs`)
+- Tracing: `init_tracing()` in `rustflow-common`, `TraceLayer` for HTTP, `#[tracing::instrument]` on handlers
+- Response compression: `CompressionLayer` with `SizeAbove(512)` on API router
+- Request counter middleware: `request_counter` logs every 100th request
 
 ### Tower Layer Stack Pattern (CRITICAL)
 Bare `RateLimitLayer` / `LoadShedLayer` won't compile with Axum — two fixes required:
 - `BufferLayer` → makes `RateLimit` cloneable (Axum's Hyper clones the service per TCP connection)
 - `HandleErrorLayer` → converts `BoxError` to HTTP response (`LoadShed` produces `BoxError`, Axum expects `Infallible`)
 
+This is encapsulated in the `rate_limited()` helper (`middleware.rs`), which also rewrites `503 → 429` and injects a `Retry-After` header:
 ```rust
-// Rate limiting applied to api router; CORS applied last = outermost
-.layer(
-    ServiceBuilder::new()
-        .layer(HandleErrorLayer::new(|err: BoxError| async move {
-            (StatusCode::SERVICE_UNAVAILABLE, format!("Service overloaded: {}", err))
-        }))
-        .layer(LoadShedLayer::new())
-        .layer(BufferLayer::new(100))
-        .layer(RateLimitLayer::new(50, Duration::from_secs(10))),
-)
-.layer(cors);  // outermost — OPTIONS preflights never reach rate limiter
+// Per-router rate limiting with different limits for reads vs writes
+let public = rate_limited(Router::new().route("/", get(list)), 100, Duration::from_secs(10));
+let protected = rate_limited(Router::new().route("/", post(create)).layer(...), 10, Duration::from_secs(10));
 ```
 
 **Planned architecture** (not yet implemented):
@@ -140,4 +151,5 @@ inclusion: always
 
 CRITICAL: Do not use interactive commands or pagers (e.g., less, more, vim). All shell commands must be non-interactive. 
 Ensure you use flags like -y for confirmations and --no-pager for CLI tools. 
-If a command typically opens a pager, pipe it to cat or set PAGER=cat in the environment to ensure the full output is returned without waiting for user input.
+If a command typically opens a pager, pipe it to cat or set PAGER=cat in the environment to ensure the full output
+is returned without waiting for user input.

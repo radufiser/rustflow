@@ -1,6 +1,6 @@
 use crate::errors::RustFlowError;
 use crate::extractors::{ValidatedJson, ValidatedQuery};
-use crate::routes::middleware::{rate_limited, require_api_key};
+use crate::routes::middleware::{rate_limited, record_client_span, require_api_key};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -8,7 +8,7 @@ use axum::routing::{get, patch, post, put};
 use axum::{middleware, Extension, Json, Router};
 use rustflow_common::{AuthenticatedClient, CreateTask, Task, TaskFilter, TaskStatus};
 use std::time::Duration;
-
+use tower_http::trace::TraceLayer;
 // ── Read handlers (public) ──────────────────────────────────
 
 /// GET /tasks?status=pending&priority=high
@@ -78,7 +78,7 @@ async fn get_one(
         )))
 }
 
-#[tracing::instrument(name="task.create", skip_all, fields(task.id))]
+#[tracing::instrument(name="task.create", skip_all, fields(entity.id))]
 async fn create(
     Extension(client): Extension<AuthenticatedClient>,
     State(state): State<AppState>,
@@ -110,7 +110,7 @@ async fn create(
         "task created"
     );
     // Record the ID now that we know it
-    tracing::Span::current().record("task.id", task.id);
+    tracing::Span::current().record("entity.id", task.id);
 
     Ok((StatusCode::CREATED, Json(task)))
 }
@@ -211,7 +211,9 @@ pub fn router(state: AppState) -> Router<AppState> {
             .route("/", post(create))
             .route("/{id}", put(update).delete(delete))
             .route("/{id}/status", patch(change_status))
+            .layer(middleware::from_fn(record_client_span))
             .layer(middleware::from_fn_with_state(state, require_api_key)),
+
         10,
         Duration::from_secs(10),
     );

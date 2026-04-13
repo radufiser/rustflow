@@ -105,3 +105,10 @@ pub async fn request_counter(State(state): State<AppState>, request: Request, ne
     }
     next.run(request).await
 }
+
+pub async fn record_client_span(request: Request, next: Next) -> Response {
+    if let Some(client) = request.extensions().get::<AuthenticatedClient>() {
+        tracing::Span::current().record("client.name", client.name.as_str());
+    }
+    next.run(request).await
+}

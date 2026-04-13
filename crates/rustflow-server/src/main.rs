@@ -5,11 +5,11 @@ mod state;
 
 use crate::routes::middleware::{rate_limited, request_counter};
 use crate::state::AppState;
-use axum::http::{HeaderName, HeaderValue, Method};
+use axum::http::{HeaderName, HeaderValue, Method, Request};
 use axum::{middleware, Router};
-use rustflow_common::{APP_NAME, APP_VERSION};
-use std::sync::Arc;
+use rustflow_common::{AuthenticatedClient, APP_NAME, APP_VERSION};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -19,8 +19,53 @@ use tower_http::compression::predicate::SizeAbove;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::trace::{DefaultOnResponse, TraceLayer};
-use tracing::Level;
+use tower_http::trace::{DefaultOnResponse, MakeSpan, TraceLayer};
+use tracing::field::Empty;
+use tracing::{Level, Span};
+
+/// Custom span factory for TraceLayer
+///
+/// For every incoming HTTP request, create a span with:
+/// - `http.method` and `http.uri` (always present)
+/// - `request_id` - a unique UUID v4 for correlating all events in this request
+/// - `client.name` - the authenticated client's name ( if present in extension)
+/// - `entity.id` - the entity ID from the URI path ( if present)
+
+#[derive(Debug, Clone)]
+struct RustFlowMakeSpan;
+
+impl<B> MakeSpan<B> for RustFlowMakeSpan {
+    fn make_span(&mut self, request: &Request<B>) -> Span {
+        // Generate a unique ID for this request - correlates all log lines
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        // Create the span with all fields declared upfront.
+        // Optional fields use Empty - they will be filled in below if available.
+        let span = tracing::debug_span!(
+            "request",
+            http.method = %request.method(),
+            http.uri = %request.uri(),
+            request_id = %request_id,
+            client.name = Empty,
+            entity.id = Empty,
+        );
+
+        if let Some(client) = request.extensions().get::<AuthenticatedClient>() {
+            span.record("client.name", &client.name.as_str());
+        }
+
+        if let Some(id) = extract_entity_id(request.uri().path()) {
+            span.record("entity.id", id.as_str());
+        }
+        span
+    }
+}
+
+fn extract_entity_id(path: &str) -> Option<String> {
+    path.split('/')
+        .find(|segment| !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()))
+        .map(|id| id.to_string())
+}
 
 fn build_app(state: &AppState) -> Router {
     // CORS configuration
@@ -99,12 +144,11 @@ fn build_app(state: &AppState) -> Router {
         // Provide state to ALL routes (merged and nested)
         .with_state(state.clone())
         .layer(
-            TraceLayer::new_for_http()
-                .on_response(
-                    DefaultOnResponse::new()
-                        .level(Level::DEBUG)
-                        .latency_unit(tower_http::LatencyUnit::Micros),
-                ),
+            TraceLayer::new_for_http().make_span_with(RustFlowMakeSpan).on_response(
+                DefaultOnResponse::new()
+                    .level(Level::DEBUG)
+                    .latency_unit(tower_http::LatencyUnit::Micros),
+            ),
         )
         // CORS is the only global layer — needed for all browser requests
         .layer(cors);
