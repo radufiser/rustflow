@@ -24,3 +24,4 @@ tower-http = { version = "0.6", features = ["fs", "cors", "compression-full", "t
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["fmt", "env-filter"]}
+tracing-appender = "0.2"

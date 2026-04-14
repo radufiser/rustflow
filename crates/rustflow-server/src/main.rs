@@ -3,6 +3,7 @@ mod extractors;
 mod routes;
 mod state;
 
+use std::path::PathBuf;
 use crate::routes::middleware::{rate_limited, request_counter};
 use crate::state::AppState;
 use axum::http::{HeaderName, HeaderValue, Method, Request};
@@ -22,6 +23,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnResponse, MakeSpan, TraceLayer};
 use tracing::field::Empty;
 use tracing::{Level, Span};
+use rustflow_common::tracing::TracingConfig;
 
 /// Custom span factory for TraceLayer
 ///
@@ -158,9 +160,16 @@ fn build_app(state: &AppState) -> Router {
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing with file logging
+    let tracing_config = TracingConfig {
+        log_directory: Some(PathBuf::from("logs")),
+    };
     // Initialize tracing first - before any other code runs
     // All tracing macros (info!, debug!, warn!) are no-ops until this is called.
-    rustflow_common::tracing::init_tracing();
+    let _guard = rustflow_common::tracing::init_tracing(tracing_config);
+    // _guard keeps the file writer alive — DO NOT drop it early.
+    // When main() returns, the guard is dropped, flushing all buffered events.
+
     let state: AppState = AppState::new();
 
     let app_router: Router = build_app(&state);
