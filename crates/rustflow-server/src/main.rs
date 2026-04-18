@@ -3,15 +3,18 @@ mod extractors;
 mod routes;
 mod state;
 
-use std::path::PathBuf;
 use crate::routes::middleware::{rate_limited, request_counter};
 use crate::state::AppState;
 use axum::http::{HeaderName, HeaderValue, Method, Request};
 use axum::{middleware, Router};
+use chrono::{NaiveDate, Utc};
+use rustflow_common::tracing::{LOG_FILE_PREFIX, TracingConfig};
 use rustflow_common::{AuthenticatedClient, APP_NAME, APP_VERSION};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::{env, fs, io};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::Notify;
@@ -23,7 +26,6 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnResponse, MakeSpan, TraceLayer};
 use tracing::field::Empty;
 use tracing::{Level, Span};
-use rustflow_common::tracing::TracingConfig;
 
 /// Custom span factory for TraceLayer
 ///
@@ -146,11 +148,13 @@ fn build_app(state: &AppState) -> Router {
         // Provide state to ALL routes (merged and nested)
         .with_state(state.clone())
         .layer(
-            TraceLayer::new_for_http().make_span_with(RustFlowMakeSpan).on_response(
-                DefaultOnResponse::new()
-                    .level(Level::DEBUG)
-                    .latency_unit(tower_http::LatencyUnit::Micros),
-            ),
+            TraceLayer::new_for_http()
+                .make_span_with(RustFlowMakeSpan)
+                .on_response(
+                    DefaultOnResponse::new()
+                        .level(Level::DEBUG)
+                        .latency_unit(tower_http::LatencyUnit::Micros),
+                ),
         )
         // CORS is the only global layer — needed for all browser requests
         .layer(cors);
@@ -160,9 +164,20 @@ fn build_app(state: &AppState) -> Router {
 
 #[tokio::main]
 async fn main() {
+    let log_dir = env::var("LOG_DIR").map(PathBuf::from).ok();
+    match log_dir.as_ref() {
+        Some(lg) => match cleanup_old_logs(lg.as_path(), 7) {
+            Ok(_) => {
+                println!("Old log cleanup completed successfully.");
+            }
+            Err(e) => eprintln!("Failed to clean up old logs: {}", e),
+        },
+        _ => (),
+    };
+
     // Initialize tracing with file logging
     let tracing_config = TracingConfig {
-        log_directory: Some(PathBuf::from("logs")),
+        log_directory: log_dir,
     };
     // Initialize tracing first - before any other code runs
     // All tracing macros (info!, debug!, warn!) are no-ops until this is called.
@@ -179,6 +194,8 @@ async fn main() {
         .expect("Failed to bind to address");
 
     tracing::info!("{} v{} listening on {}", APP_NAME, APP_VERSION, addr);
+
+    burst_events();
 
     // Shared doorbell: one handle goes into the server, one stays in main
     let shutdown_notify: Arc<Notify> = Arc::new(Notify::new());
@@ -221,6 +238,56 @@ async fn main() {
             }
         }
     }
+}
+
+fn parse_date(filename: &str) -> Result<NaiveDate, Box<dyn std::error::Error>> {
+    let date_str = filename
+        .strip_prefix(LOG_FILE_PREFIX)
+        .and_then(|suffix| suffix.strip_prefix('.'))
+        .ok_or("unexpected log filename")?;
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")?;
+    Ok(date)
+}
+
+fn is_expired(date: NaiveDate, max_age_days: i64) -> bool {
+    Utc::now().date_naive() - date >= chrono::Duration::days(max_age_days)
+}
+
+fn cleanup_old_logs(dir: &Path, max_age_days: i64) -> io::Result<()> {
+    let files_to_delete: Vec<PathBuf> = fs::read_dir(dir)?
+        .filter_map(|entry: Result<fs::DirEntry, io::Error>| {
+            match entry {
+                Ok(e) => {
+                    let name = e.file_name();
+                    let filename = name.to_str()?;
+                    let date = parse_date(filename).ok()?;
+                    if is_expired(date, max_age_days) {
+                        Some(e.path())
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Failed to read file name, skipping");
+                    None
+                }
+            }
+        })
+        .collect();
+
+    for path in &files_to_delete {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn burst_events() {
+    let start = Instant::now();
+    for i in 0..10_000 {
+        tracing::info!("burst event {}", i);
+    }
+    let elapsed = start.elapsed();
+    tracing::info!("10,000 events in {:?}", elapsed);
 }
 
 /// Wait for either SIGINT (Ctrl+C) or SIGTERM (docker stop / kill -15)
