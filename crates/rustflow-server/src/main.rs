@@ -175,9 +175,15 @@ async fn main() {
         _ => (),
     };
 
+    // Determine log format from the environment
+     let json_output = env::var("LOG_FORMAT")
+         .map(|v| v.eq_ignore_ascii_case("json"))
+         .unwrap_or(false);
+
     // Initialize tracing with file logging
     let tracing_config = TracingConfig {
         log_directory: log_dir,
+        json_output,
     };
     // Initialize tracing first - before any other code runs
     // All tracing macros (info!, debug!, warn!) are no-ops until this is called.

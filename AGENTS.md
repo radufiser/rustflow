@@ -30,7 +30,8 @@ Cargo workspace with two crates (more planned per `Course.md`):
 
 ```bash
 cargo build                       # workspace
-cargo run -p rustflow-server      # server on :3000
+cargo run -p rustflow-server      # server on :3000 (stdout-only logging)
+LOG_DIR=logs cargo run -p rustflow-server  # enable file logging to logs/
 cargo test --workspace            # unit + doc tests
 ```
 
@@ -100,12 +101,27 @@ async fn create(...) -> Result<...> {
 - `skip_all` — avoid logging large state; select fields explicitly
 - Sub-spans for I/O: `.instrument(tracing::info_span!("http.get", url = %url))` (see `enrichment.rs`)
 
+### Tracing Subscriber — Layered Registry Pattern
+Since 3.6, tracing uses `registry().with().init()` (not `fmt().init()`), enabling multiple output layers:
+```rust
+tracing_subscriber::registry()
+    .with(env_filter)
+    .with(stdout_layer)
+    .with(file_layer)    // Option<Layer> — None = no-op
+    .init();
+```
+- `TracingConfig` struct controls which layers are active (extensible for future JSON/OTLP layers)
+- File logging uses `tracing-appender` with daily rotation and `NonBlocking` writer
+- `init_tracing()` returns `Option<WorkerGuard>` — **must** be held in `main()` for the application lifetime (dropping it loses buffered events)
+- `LOG_DIR` env var controls file logging at runtime; unset = stdout-only
+- ANSI is disabled on stdout when file logging is active (shared span formatting would leak escape codes into the file)
+
 ## Course-Driven Development
 
-Current state: **Section 3.5** (tracing with named Axum spans and `#[instrument]` on handlers).
+Current state: **Section 3.6** (file logging with daily rotation, layered registry, `WorkerGuard` lifetime).
 
 **Next section** (doc exists in `/docs/sections/`, ready to implement):
-- 3.6 — Logging to File
+- 3.7 — Structured JSON Logging
 
 **Patterns established so far:**
 - Auth middleware with identity injection (`middleware.rs` → `AuthenticatedClient` in extensions)
@@ -117,6 +133,11 @@ Current state: **Section 3.5** (tracing with named Axum spans and `#[instrument]
 - Chained `.layer()` ordering: **last applied = outermost** (runs first on request)
 - Graceful shutdown: `Notify` + `tokio::select!` + 10s drain timeout (`main.rs`)
 - Tracing: `init_tracing()` in `rustflow-common`, `TraceLayer` for HTTP, `#[tracing::instrument]` on handlers
+- File logging: `TracingConfig` + `tracing-appender` daily rotation + `NonBlocking` writer (see `tracing.rs`)
+- `WorkerGuard` held in `main()` via `let _guard = init_tracing(config)` — dropped on shutdown to flush
+- `LOG_DIR` env var: set to enable file logging (e.g. `LOG_DIR=logs`), unset for stdout-only
+- Log cleanup: `cleanup_old_logs()` deletes log files older than 7 days at startup
+- Custom `RustFlowMakeSpan`: per-request span with `request_id` (UUID v4), `client.name`, `entity.id`
 - Response compression: `CompressionLayer` with `SizeAbove(512)` on API router
 - Request counter middleware: `request_counter` logs every 100th request
 
